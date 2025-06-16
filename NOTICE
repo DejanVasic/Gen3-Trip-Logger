@@ -1,0 +1,51 @@
+NOTICE
+
+This project uses several third-party libraries. Below is a list of these libraries, their authors (if known), and their respective license types.
+
+1. WiFi.h
+   - Source: Arduino core for ESP32
+   - License: LGPL-2.1 or later
+
+2. HardwareSerial.h
+   - Source: Arduino core for ESP32
+   - License: LGPL-2.1 or later
+
+3. ESP_Google_Sheet_Client
+   - Author: mobizt
+   - License: MIT License
+   - URL: https://github.com/mobizt/ESP-Google-Sheet-Client
+   - Copyright (c) 2024 mobizt
+
+4. SPI.h
+   - Source: Arduino core
+   - License: LGPL-2.1 or later
+
+5. SD.h
+   - Source: Arduino core or ESP32 SD library
+   - License: LGPL-2.1 or later
+
+6. FS.h
+   - Source: Arduino core for ESP32
+   - License: LGPL-2.1 or later
+
+7. TinyGPSPlus
+   - Author: Mikal Hart
+   - License: LGPL-2.1 or later
+   - URL: https://github.com/mikalhart/TinyGPSPlus
+
+8. ESPAsyncWebServer
+   - Author: me-no-dev
+   - License: LGPL-3.0
+   - URL: https://github.com/me-no-dev/ESPAsyncWebServer
+
+9. esp32_can
+   - Author: collin80
+   - License: MIT License
+   - URL: https://github.com/collin80/esp32_can
+   - Copyright (c) 2018 Collin Kidder
+
+10. EEPROM.h
+    - Source: Arduino core for ESP32
+    - License: LGPL-2.1 or later
+
+Please ensure compliance with each library's license terms when redistributing or modifying this project.
