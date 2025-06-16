@@ -1,6 +1,8 @@
 NOTICE
 
-This project uses several third-party libraries. Below is a list of these libraries, their authors (if known), and their respective license types.
+The Android app uses only standard Android SDK components provided by Google. No third-party libraries are included.
+
+The ESP32 project uses several third-party libraries. Below is a list of these libraries, their authors (if known), and their respective license types.
 
 1. WiFi.h
    - Source: Arduino core for ESP32
