@@ -50,4 +50,16 @@ The ESP32 project uses several third-party libraries. Below is a list of these l
     - Source: Arduino core for ESP32
     - License: LGPL-2.1 or later
 
+11. canvas-gauges
+    - License: MIT License
+    - Source: https://github.com/Mikhus/canvas-gauges
+
+12. Font Awesome
+    - License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+    - Source: https://fontawesome.com/
+
+13. Google Fonts
+    - License: Open Font License (OFL)
+    - Source: https://fonts.google.com/
+
 Please ensure compliance with each library's license terms when redistributing or modifying this project.
