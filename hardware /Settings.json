@@ -1,0 +1,18 @@
+{
+  "type": "service_account",
+  "project_id": "gen3logger",
+  "private_key_id": "your_key_id",
+  "private_key": "-----BEGIN PRIVATE KEY-----REPLACE WITH YOUR PRIVATE KEY-----END PRIVATE KEY-----\n",
+  "client_email": "datalogger@gen3logger.iam.gserviceaccount.com",
+  "client_id": "123456789012345678901",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/datalogger%gen3logger.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com",
+  "spreadsheetId": "read_from_sharred_google_spreadsheet_url",
+  "cell": "Prius!A1",
+  "SSID": "S24U",
+  "WiFipass": "01234567",
+  "Hostname": "gen3logger" 
+}
