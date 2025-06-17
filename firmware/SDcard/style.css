@@ -1,0 +1,176 @@
+html {
+	font-family: Orbitron, Arial, Helvetica, sans-serif;
+	display: inline-block;
+	text-align: center;
+	margin: 0;
+    padding: 0;
+}
+
+h1 {
+	font-size: 1.8rem;
+	color: white;
+}
+
+p {
+	font-size: 1.4rem;
+}
+
+.topnav {
+	overflow: hidden;
+	background-color: #0A1128;
+}
+
+body {
+	background-image: radial-gradient(rgb(25, 40, 43), black);
+	color: #90E8CE;
+	height: 720px;
+	margin: 0;
+	padding: 0;
+}
+
+.content {
+	padding: 3px;
+	max-width: 1280px;
+	max-height: 720px;
+}
+
+.card-grid {
+	margin: 0 auto;
+	display: grid;
+	grid-gap: 0rem;
+	grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+	width: 100%;
+}
+
+.card-title {
+	font-size: 36px;
+}
+
+.card0 {
+	font-size: 36px;
+	position: relative;
+	top: 30px;
+}
+
+.material-symbols-outlined {
+	font-size: 36px;
+	font-variation-settings:
+		'FILL' 0,
+		'wght' 400,
+		'GRAD' 0,
+		'opsz' 24
+}
+
+.card {
+	font-family: 'Orbitron';
+	font-size: 30px;
+}
+
+.card2 {
+	display: flex;
+	align-items: center;
+	font-family: 'Orbitron';
+	font-size: 36px;
+}
+
+.card3 {
+	font-size: 100px;
+	margin-top: -15px;
+}
+
+.card4 {
+	font-size: 30px;
+	margin-top: 30px;
+}
+
+.button {
+  background-color: rgb(144, 232, 206);
+  border: none;
+  color: rgb(0, 0, 0);
+  padding-top: 25px;    
+  padding-bottom: 15px; 
+  text-decoration: none;
+  font-size: 30px;
+  cursor: pointer;
+  border-radius: 25px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px; 
+  width: 150px; 
+}
+
+.icons-row {
+  display: flex;
+  flex-wrap: nowrap; 
+}
+
+.button-text {
+  font-size: 15px;
+}
+
+
+
+.button .selected {
+	border: none;
+}
+
+.text-container {
+	display: inline-block;
+	margin-left: 10px;
+	line-height: 1.5;
+}
+
+.button2 {
+	background-color: rgb(255, 84, 98);
+}
+
+.header {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	padding: 10px;
+	position: relative;
+	padding-bottom: 0;
+    margin-bottom: 0;
+}
+
+.header .trip {
+	text-align: left;
+	position: absolute;
+	left: 10px;
+	font-family: 'Orbitron', sans-serif;
+	font-size: 30px;
+}
+
+.header .odom {
+	text-align: right;
+	position: absolute;
+	right: 10px;
+	font-family: 'Orbitron', sans-serif;
+	font-size: 30px;
+}
+
+.logo {
+	position: relative;
+	top: 25px;
+	/*  filter: invert(0.15) sepia(1) saturate(4) hue-rotate(130deg); */
+	/* filter: invert(0.15) sepia(1) saturate(4) hue-rotate(140deg); */
+}
+
+.header {
+	text-align: center;
+}
+
+.debug {
+	font-family: Arial, Helvetica, sans-serif;
+	font-size: 10;
+	text-align: left;
+}
+
+/* .boje {
+	background-color: (rgba(0, 255, 0, 0.541) ;
+    background-color: (rgba(255,255,0,.3) ;
+	background-color: (rgba(255,30,0,.3) ;
+} */

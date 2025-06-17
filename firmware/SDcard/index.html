@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>Gen3 ESP32 dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" resolution="1280x720">
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css"
+    integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" />
+  <link rel="stylesheet" type="text/css" href="style.css">
+  <script src="http://cdn.rawgit.com/Mikhus/canvas-gauges/gh-pages/download/2.1.7/all/gauge.min.js"></script>
+</head>
+
+<body>
+
+  <div class="content">
+
+    <div class="header">
+      <div class="trip">
+        <i class="fas fa-road"></i>&nbsp;<span id="tripKm">0</span></br>
+        <i class="far fa-clock"></i>&nbsp;<span id="timeHM">00:00</span>
+      </div>
+      <div class="logo">
+        <img id="prius" src="https://upload.wikimedia.org/wikipedia/commons/8/89/Toyota_Prius_logo.svg" width="420"
+          height="70">
+      </div>
+      <div class="odom">
+        <!-- <i class="fas fa-road"></i>&nbsp;<span id="odometer"></span></br> -->
+        <!-- <div class="card0"></div> -->
+        <i class="fas fa-satellite-dish"></i>&nbsp;<span id="numSat">0</span><br>
+        <i class="fas fa-car-side"></i>...<i class="fas fa-gas-pump"></i>&nbsp;
+        <span id="dte">&#8734;</span>
+      </div>
+    </div>
+    <div class="card-grid">
+      <div class="card">
+        <p class="card-title"><i class="fas fa-gas-pump"></i><i class="fas fa-road"></i></p>
+        <canvas id="gauge-avCons"></canvas>
+      </div>
+      <div class="card">
+        <p class="card-title"><i class="fas fa-tachometer-alt"></i></p>
+        <canvas id="gauge-rpm"></canvas>
+      </div>
+      <div class="card">
+        <p class="card-title"><i class="fas fa-caret-left"></i><i class="fas fa-gas-pump"></i></p>
+        <canvas id="gauge-tank"></canvas>
+      </div>
+      <div class="card">
+        <p class="card-title"><i class="fas fa-temperature-high"></i></p>
+        <canvas id="gauge-temperature"></canvas>
+      </div>
+    </div>
+    <div class="card-grid">
+      <div class="card2">
+        &nbsp;<button id="resetAvSpeed" class="button">
+          <div class="icons-row"> <!-- Flex container for icons -->
+            <i class="fas fa-history"></i>
+            <i class="fas fa-road"></i>
+            <i class="far fa-clock"></i>
+          </div>
+          <span class="button-text">#</span> <!-- Text below -->
+        </button>
+        <div class="text-container">
+          <span id="avSpeed">0</span>
+          <span id="avSpeedR"></span>
+        </div>
+      </div>
+      <div class="text-container">
+        <div class="card3">
+          <span id="speed">0</span>
+        </div>
+      </div>
+      <div class="card">
+        <canvas id="gauge-angle"></canvas>
+      </div>
+      <div class="text-container">
+        <div class="card4">
+          <i class="fas fa-car"></i>
+          <span id="tempRoomC">0</span>°C
+        </div>
+      </div>
+    </div>
+  </div>
+  <!--   <div class="debug">
+    </br>
+  </div>
+  <div id="debugText" class="debug">
+    |
+  </div> -->
+  <script src="script.js"></script>
+</body>
+
+</html>
