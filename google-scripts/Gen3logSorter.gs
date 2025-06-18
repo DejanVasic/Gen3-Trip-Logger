@@ -1,4 +1,4 @@
-const PriusESP32 = SpreadsheetApp.openById("read_from_sharred_google_spreadsheet_url")
+const PriusESP32 = SpreadsheetApp.openById("1MY7rprDmPVs06Jik2sF1Y-LCJc9weHHboOkqMk8uoIU")
 const TimeZone = PriusESP32.getSpreadsheetTimeZone()
 const PriusSh = PriusESP32.getSheetByName("Prius")
 const GorivoSh = PriusESP32.getSheetByName("Gorivo")
@@ -53,10 +53,8 @@ function Sorter() {
   var lastRow = PriusSh.getLastRow() - 1
   //PriusSh.getRange("M:M").setNumberFormat("0")
   var Tabela = PriusSh.getRange(2, 1, lastRow, 18).getValues()
-  if (Tabela[lastRow - 1][14] != "") {
-    //PriusSh.getRange("M:M").setNumberFormat("[h]:mm:ss")
-    return
-  } //no new data appended
+
+  if (Tabela[lastRow - 1][14] != "") { return } //no new data appended
 
   Tabela.sort(sortFunction)
   var LastTrip = "Tank trip: "
@@ -83,7 +81,7 @@ function Sorter() {
         Tabela[i][12] = Tabela[i][12] / 86400000 //1000 * 60 * 60 * 24 
       }
 
-      if (Tabela[i][0] > 1e9) {
+      if (Tabela[i][0] > 1E9) {
         Tabela[i][14] = Utilities.formatDate(new Date(Tabela[i][0] * 1000), TimeZone, "dd.MM.yyyy. HH:mm:ss")
       } else {
         Tabela[i][14] = 0
@@ -94,11 +92,13 @@ function Sorter() {
       Tabela[i][16] = Tabela[i][9] > 0 ? 100 * Tabela[i][10] / Tabela[i][9] : 0
 
       if (i + 1 < lastRow) {
-        if (Tabela[i][3] - 5 > Tabela[i + 1][3]) {//tank refill?
+
+        if (Tabela[i][3] == 0) { //car was in Ignition-On Mode (after Accessory Mode, without brake pedal pressed) => copy previous value
+          Tabela[i][3] = Tabela[i + 1][3]
+        } else if (Tabela[i][3] - 5 > Tabela[i + 1][3]) {//tank refill?
           TankRefill = i
           for (var a = i + 1; a < lastRow; a++) {
             if (Tabela[a][17].toString().startsWith("Av:")) { //previous refill
-              //Logger.log(Tabela[i][3].toString() + "-" + Tabela[a][3].toString() + "/" + Tabela[i][2].toString() + "-" + Tabela[a][2].toString())
               Put = Tabela[i][2] - Tabela[a][2]
               Litara = Tabela[i][3] - Tabela[i + 1][3]
               const CeneSh = PriusESP32.getSheetByName("Gorivo")
