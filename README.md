@@ -2,8 +2,6 @@
 
 An ESP32-based smart automotive companion for the Toyota Prius Gen 3. This device interfaces with the vehicle's CAN bus to monitor, log, and display trip data, while also enhancing convenience and safety with automation features.
 
-**Note:** For Google Sheets logging and dashboard features to function properly, the microcontroller must be connected to the internet via your phone’s hotspot.
-
 ---
 
 ## ✨ Features
@@ -20,7 +18,7 @@ An ESP32-based smart automotive companion for the Toyota Prius Gen 3. This devic
   - Trip duration, distance, average fuel consumption
   - Real current and average speed (with reset for toll to toll average speeding measurement)
 - **Google Sheets Sync**:
-  - Uploads trip data to Google Sheets or temporarily saved them to SD card if there is no internet link detected
+  - Uploads trip data to Google Sheets or temporarily saves them to SD card if there is no internet link detected
   - Generates trip maps using Google Apps Script
   - On tank refill logs previous drive data
 - **Android Head Unit App**:
@@ -43,8 +41,8 @@ An ESP32-based smart automotive companion for the Toyota Prius Gen 3. This devic
 - SD card module
 - DC/DC converter (Mini560)
 - Optocoupler (ASSR-1228)
-
 ---
+
 
 ## 💻 Software Components
 
@@ -55,24 +53,16 @@ An ESP32-based smart automotive companion for the Toyota Prius Gen 3. This devic
 
 ---
 
-## 🚀 Setup Instructions
+## 📶 WiFi Connection
 
-1. **Hardware Assembly**:
-   - Connect ESP32 to CAN transceiver, SD card reader and GPS module
-   - Wire power from vehicle (with voltage regulation) and CAN bus 
+To log data to Google Sheets, the device needs an active Wi-Fi connection. If no connection is available, data will be temporarily stored on the SD card until connectivity is restored.<br>
+For that you can use your phone as a hotspot. If you have Bluetooth device in your car, the phone can be automatized to turn on hotspot once its connected to that Bluetooth and disconnect when not. (e.g. Samsung have "Modes and Routines" to turn on Hotspot when Bluetooth device is connected).<br>
+When you create [Google service account](https://github.com/DejanVasic/Gen3-Trip-Logger/blob/master/Google-spreadsheet/README.md) add to that .json file fields: "_spreadsheetId_", "_cell_", "_SSID_", "_WiFipass_", "_Hostname_" like in [sample file](https://github.com/DejanVasic/Gen3-Trip-Logger/blob/master/firmware/SDcard/Settings.json) and place it on SD card.<br>
+- **spreadsheetId** is ID of Google sheet to which you log trip data.<br>Read it from url (e.g. ...spreadsheets/d/**this_is_sheet_id_for_copying_it**/edit...).
+- **cell** is spreadsheet name and first table cell address 
+- **SSID** is WiFi network name (of your phone or garage/house AP)
+- **WiFipass** is security key (WPA3 isn't supported since that library uses too much program storage space).
+- **Hostname** is trial to use it with mdns Arduino library to access ESP32 Webpage (dashboard) using its hostname and bonjour browser but since it isn't reliable you can use this [android app](https://github.com/DejanVasic/Gen3-Trip-Logger/blob/master/app/release/app-release.apk)
 
-2. **Firmware Upload**:
-   - Flash the Arduino sketch to ESP32
-   - Configure Wi-Fi credentials and CAN bus parameters
 
-3. **Web Dashboard**:
-   - Access via phones hotspot to ESP32 web page
-   - View real-time trip data
 
-4. **Google Sheets Integration**:
-   - Set up Google Sheet and Apps Script
-   - Authorize ESP32 to send data via API
-
-5. **Android App**:
-   - Install APK on car head unit
-   - Launch to view dashboard and music info
