@@ -62,7 +62,7 @@ When you create [Google service account](https://github.com/DejanVasic/Gen3-Trip
 - **cell** is spreadsheet name and first table cell address 
 - **SSID** is WiFi network name (of your phone or garage/house AP)
 - **WiFipass** is security key (WPA3 isn't supported since that library uses too much program storage space).
-- **Hostname** is trial to use it with mdns Arduino library to access ESP32 Webpage (dashboard) using its hostname and bonjour browser but since it isn't reliable you can use this [android app](https://github.com/DejanVasic/Gen3-Trip-Logger/blob/master/app/release/app-release.apk)
+- **Hostname** is trial to use it with mdns Arduino library to access ESP32 Webpage (dashboard) using its hostname and bonjour browser but since it isn't reliable you can use this [android app](https://github.com/DejanVasic/Gen3-Trip-Logger/tree/master/app/release)
 
 
 
