@@ -1,14 +1,12 @@
 /*
-  Rui Santos
-  Complete project details at https://RandomNerdTutorials.com/esp32-datalogging-google-sheets/
-  
-  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files.
-  The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-  Adapted from the examples of the Library Google Sheet Client Library for Arduino devices: 
+
+  Adapted from the examples of the Libraryes for Arduino devices
+  Some handy tutorials: 
   https://github.com/mobizt/ESP-Google-Sheet-Client
   https://randomnerdtutorials.com/esp32-neo-6m-gps-module-arduino/
   https://randomnerdtutorials.com/esp32-microsd-card-arduino/
   https://RandomNerdTutorials.com/esp32-web-server-gauges/
+  https://randomnerdtutorials.com/esp32-datalogging-google-sheets/
   https://electropeak.com/learn/sending-data-from-esp32-or-esp8266-to-google-sheets-2-methods/?srsltid=AfmBOopzhUqGB4WF2dHTu3gyPGgh2NFoK30_Kxx5BiYAGNEQSFbGRDLr
 
 */

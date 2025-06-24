@@ -72,7 +72,7 @@ double litersSum = 0.0;
 TaskHandle_t GoogleTask = NULL;
 TaskHandle_t GPStask = NULL;
 //unsigned char prevGearValue = GEAR_P;
-uint32_t tripCounter = 0;
+uint16_t tripCounter = 0;
 uint8_t dimmOut = 33;  //pin
 //uint8_t uploadRetr = 0;  //Retry counter to upload on startup
 int8_t tempC = 0;
@@ -214,16 +214,12 @@ void setup() {
   CAN0.setCallback(9, CB_REPLY_ID_RTEMP);
   //CAN0.setCallback(10, CB_ALL);
 
-  EEPROM.begin(4);
-  tripCounter |= EEPROM.read(0) << 24;  // Read the most significant byte
-  tripCounter |= EEPROM.read(1) << 16;
-  tripCounter |= EEPROM.read(2) << 8;
-  tripCounter |= EEPROM.read(3);
+  EEPROM.begin(2);
+  tripCounter |= EEPROM.read(0) << 8;
+  tripCounter |= EEPROM.read(1);
   tripCounter++;
-  EEPROM.write(0, (uint8_t)(tripCounter >> 24));
-  EEPROM.write(1, (uint8_t)(tripCounter >> 16));
-  EEPROM.write(2, (uint8_t)(tripCounter >> 8));
-  EEPROM.write(3, (uint8_t)tripCounter);
+  EEPROM.write(0, (uint8_t)(tripCounter >> 8));
+  EEPROM.write(1, (uint8_t)tripCounter);
   EEPROM.commit();
 
   //lockedDoors = false;
