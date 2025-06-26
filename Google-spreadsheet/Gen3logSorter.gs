@@ -1,8 +1,87 @@
 const PriusESP32 = SpreadsheetApp.openById("read_from_sharred_google_spreadsheet_url")
-const TimeZone = PriusESP32.getSpreadsheetTimeZone()
 const PriusSh = PriusESP32.getSheetByName("Prius")
-const GorivoSh = PriusESP32.getSheetByName("Gorivo")
-var map
+
+
+function Mapiranje(e) {
+  var Shit = e.source.getActiveSheet()
+
+  if (Shit.getName() == "Map") {
+    var Red = e.range.getRow()
+    var Kolona = e.range.getColumn()
+
+    if (Red == 1 && Kolona == 1) { // A1
+      var Vrednost = e.range.getValue()
+      var Start = true
+      var lastRow = PriusSh.getLastRow()
+      var Tabela = PriusSh.getRange(1, 2, lastRow, 14).getValues()
+      var Opis = [9]
+      var AltStart = 0
+      var pLat = 0
+      var plon = 0
+      // Create a map
+      var map = Maps.newStaticMap()
+      var parking = Maps.newStaticMap()
+
+
+      // Remove all map images
+      Shit.getImages().forEach(function (i) { i.remove() })
+
+      for (var i = lastRow - 1; i > 0; i--) {
+        if (Tabela[i][7] == Vrednost && Tabela[i][4] != 0) {
+          if (Start) {
+            map.setMarkerStyle(Maps.StaticMap.MarkerSize.SMALL, "0x00FF00", "Green")
+            pLat = Tabela[i][4]
+            plon = Tabela[i][5]
+            Start = false
+
+            Opis[0] = [Tabela[i][7]]
+            Opis[1] = [Tabela[i][12]]
+            Opis[2] = [Tabela[i][8]]
+            Opis[3] = [0]
+            Opis[4] = [0]
+            Opis[5] = [Tabela[i][10]]
+            Opis[6] = [Tabela[i][11]]
+            Opis[7] = [0]
+            Opis[8] = [0]
+
+
+            AltStart = Tabela[i][6]
+          } else if (Tabela[i - 1][7] != Vrednost) {
+            Opis[0] = [Tabela[i][7]]
+            Opis[1] = [Tabela[i][12]]
+            Opis[2] = [Tabela[i][8]]
+            Opis[3] = [100 * Tabela[i][9] / Tabela[i][8]]
+            Opis[4] = [3600000 * Tabela[i][8] / Tabela[i][0]]
+            Opis[5] = [Tabela[i][10]]
+            Opis[6] = [Tabela[i][11]]
+            Opis[7] = [100 / Opis[2] * Opis[5]]
+            Opis[8] = [Tabela[i][6] - AltStart]
+            pLat = Tabela[i][4]
+            plon = Tabela[i][5]
+            map.setMarkerStyle(Maps.StaticMap.MarkerSize.SMALL, "0xFF0000", "Red")
+            map.addMarker(Tabela[i][4], Tabela[i][5])
+            break
+          } else {
+            map.setMarkerStyle(Maps.StaticMap.MarkerSize.SMALL, "0x0000FF", "Blue")
+          }
+          map.addMarker(Tabela[i][4], Tabela[i][5])
+        } else if (!Start) {
+          break
+        }
+      }
+      parking.setMarkerStyle(Maps.StaticMap.MarkerSize.SMALL, "0xFF8000", "Orange")
+      parking.addMarker(pLat, plon)
+      Shit.insertImage(Utilities.newBlob(parking.getMapImage(), "image/png", 1), 4, 1)
+      Shit.insertImage(Utilities.newBlob(map.getMapImage(), "image/png", 1), 4, 26)
+      e.range.setValue("TRIP #")
+      Logger.log(Opis.toString())
+      Shit.getRange(1, 2, 9).setValues(Opis)
+
+    }
+  }
+}
+
+
 
 function InsertTriggers() {
   // Get all existing triggers for this project.
@@ -49,8 +128,11 @@ function InsertTriggers() {
   }
 }
 
+
+
 function Sorter() {
   var lastRow = PriusSh.getLastRow() - 1
+  //PriusSh.getRange("M:M").setNumberFormat("0")
   var Tabela = PriusSh.getRange(2, 1, lastRow, 18).getValues()
 
   if (Tabela[lastRow - 1][14] != "") { return } //no new data appended
@@ -81,7 +163,7 @@ function Sorter() {
       }
 
       if (Tabela[i][0] > 1E9) {
-        Tabela[i][14] = Utilities.formatDate(new Date(Tabela[i][0] * 1000), TimeZone, "dd.MM.yyyy. HH:mm:ss")
+        Tabela[i][14] = Utilities.formatDate(new Date(Tabela[i][0] * 1000), PriusESP32.getSpreadsheetTimeZone(), "dd.MM.yyyy. HH:mm:ss")
       } else {
         Tabela[i][14] = 0
       }
@@ -92,8 +174,15 @@ function Sorter() {
 
       if (i + 1 < lastRow) {
 
-        if (Tabela[i][3] == 0) { //car was in Ignition-On Mode (after Accessory Mode, without brake pedal pressed) => copy previous value
-          Tabela[i][3] = Tabela[i + 1][3]
+        if (Tabela[i][3] == 0) { //car was in Ignition-On Mode (after Accessory Mode, without brake pedal pressed) => copy previous known value
+          var tempTank = 0
+          for (var t = i + 1; t < lastRow; t++) {
+            if (Tabela[t][3] > 0) {
+              tempTank = Tabela[t][3]
+              break
+            }
+          }
+          Tabela[i][3] = tempTank
         } else if (Tabela[i][3] - 5 > Tabela[i + 1][3]) {//tank refill?
           TankRefill = i
           for (var a = i + 1; a < lastRow; a++) {
@@ -118,6 +207,8 @@ function Sorter() {
 
   Put = Tabela[0][2] - Tabela[LastRefill][2]
   Litara = Tabela[LastRefill][3] - Tabela[0][3]
+
+  //="Tank trip: " & (C2 - (INDEX(FILTER(C2:C; REGEXMATCH(P2:P; "^Av:") ); 1))) & " km   " & text(100 * (INDEX(FILTER(D2:D; REGEXMATCH(P2:P; "^Av:")); 1) - D2) / (C2 - (INDEX(FILTER(C2:C; REGEXMATCH(P2:P; "^Av:") ); 1)));"#0.0") & " l/100km "
 
   LastTrip += Put.toString() + " km  "
   LastTrip += (100 * Litara / Put).toFixed(1) + " l/100km, OBD: "
@@ -161,63 +252,4 @@ function sortFunction(a, b) {
   if (a[1] > b[1]) { return -1 }
 
   return 0
-}
-
-
-function Mapiranje(e) {
-  var Shit = e.source.getActiveSheet()
-
-  if (Shit.getName() == "Map") {
-    var Red = e.range.getRow()
-    var Kolona = e.range.getColumn()
-
-    if (Red == 1 && Kolona == 1) { // A1
-      var Vrednost = e.range.getValue()
-      var Start = true
-      var lastRow = PriusSh.getLastRow() - 1
-      var Tabela = PriusSh.getRange(1, 2, lastRow, 14).getValues()
-      var Opis = [9]
-      var AltStart = 0
-
-      // Create a map
-      map = Maps.newStaticMap()
-
-      // Remove all map images
-      Shit.getImages().forEach(function (i) { i.remove() })
-
-      for (var i = lastRow - 1; i > 0; i--) {
-        if (Tabela[i][7] == Vrednost && Tabela[i][4] != 0) {
-          if (Start) {
-            map.setMarkerStyle(Maps.StaticMap.MarkerSize.SMALL, "0x00FF00", "Green")
-            Start = false
-
-            AltStart = Tabela[i][6]
-          } else if (Tabela[i - 1][7] != Vrednost) {
-            map.setMarkerStyle(Maps.StaticMap.MarkerSize.SMALL, "0xFF0000", "Red")
-            Opis[0] = [Tabela[i][7]]
-            Opis[1] = [Tabela[i][12]]
-            Opis[2] = [Tabela[i][8]]
-            Opis[3] = [100 * Tabela[i][9] / Tabela[i][8]]
-            Opis[4] = [3600000 * Tabela[i][8] / Tabela[i][0]]
-            Opis[5] = [Tabela[i][10]]
-            Opis[6] = [Tabela[i][11]]
-            Opis[7] = [100 / Opis[2] * Opis[5]]
-            Opis[8] = [Tabela[i][6] - AltStart]
-
-          } else {
-            map.setMarkerStyle(Maps.StaticMap.MarkerSize.SMALL, "0x0000FF", "Blue")
-          }
-          map.addMarker(Tabela[i][4], Tabela[i][5])
-
-
-        }
-      }
-
-      Shit.insertImage(Utilities.newBlob(map.getMapImage(), "image/png", 1), 4, 1)
-      e.range.setValue("TRIP #")
-      Logger.log(Opis.toString())
-      Shit.getRange(1, 2, 9).setValues(Opis)
-
-    }
-  }
 }
