@@ -1,23 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout  xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/swipeRefreshLayout"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
-    <WebView
-        android:id="@+id/webview"
+    android:layout_height="match_parent"
+    tools:context=".MainActivity">
+
+    <!-- A FrameLayout is used here to hold multiple children (WebView and TextView)
+         as SwipeRefreshLayout can only have one direct child. -->
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="@android:color/black"
-        android:visibility="gone" />
-    <TextView
-        android:id="@+id/songOverlayTextView"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top|center_horizontal"
-        android:background="#00000000"
-        android:padding="8dp"
-        android:textColor="@color/ic_launcher_background"
-        android:textSize="16sp"
-        android:text=""
-        android:visibility="gone" />
-</FrameLayout>
-    <!--    "@color/ic_launcher_background"  "#94E6CF"-->
+        android:background="@android:color/black">
+
+        <WebView
+            android:id="@+id/webview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@android:color/black"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/songOverlayTextView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal"
+            android:background="#00000000"
+            android:padding="8dp"
+            android:textColor="@color/ic_launcher_background"
+            android:textSize="16sp"
+            android:text=""
+            android:visibility="gone" />
+
+    </FrameLayout>
+</androidx.swiperefreshlayout.widget.SwipeRefreshLayout>

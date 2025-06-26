@@ -50,17 +50,18 @@ class MusicNotificationListenerService : NotificationListenerService() {
                 songInfo = songInfo.substring(0, 100) + "..."
             }
             if (songInfo.isNotEmpty()) {
-                updateOverlay(songInfo)
+                // Pass both songInfo and the package name
+                updateOverlay(songInfo, sbn.packageName)
             }
         }
     }
 
-    private fun updateOverlay(songInfo: String) {
+    // Modified to accept package name
+    private fun updateOverlay(songInfo: String, packageName: String) {
         val intent = Intent("com.hotspotIPbrowser.MUSIC_INFO_UPDATE").apply {
             putExtra("songInfo", songInfo)
+            putExtra("packageName", packageName) // Pass the package name
         }
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
 }
-
-

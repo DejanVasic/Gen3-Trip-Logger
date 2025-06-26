@@ -1,6 +1,7 @@
 package com.hotspotIPbrowser
 
 //import android.util.Log
+import android.annotation.SuppressLint
 import com.hotspotIPbrowser.MusicNotificationListenerService
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -10,6 +11,8 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.view.GestureDetector
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
@@ -25,32 +28,106 @@ import androidx.core.content.edit
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import java.net.NetworkInterface
 import java.util.Collections
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 
 class MainActivity : AppCompatActivity() {
+    private lateinit var swipeRefreshLayout: SwipeRefreshLayout
     private lateinit var myWebView: WebView
     private var retryCount = 0
     private val handler = Handler(Looper.getMainLooper())
     private var newLastSegment = 89 // Default value, will be loaded or set by user
     private val perfName = "AppSettings"
     private val prefLastSegment = "newLastSegment"
+    private val prefLastIpAddress = "lastIpAddress"
     private lateinit var songOverlayTextView: TextView
     private val perfNotificationPrompt = "notification_prompted"
     private var notificationPrompted = false
+    private var musicAppPackage: String? = null
+    private lateinit var gestureDetector: GestureDetector
     private val musicInfoReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             var songInfo = intent?.getStringExtra("songInfo")
+            musicAppPackage = intent?.getStringExtra("packageName") // Get the package name
             songOverlayTextView.text = songInfo
             songOverlayTextView.visibility =
                 if (songInfo.isNullOrEmpty()) View.GONE else View.VISIBLE
         }
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-
+        swipeRefreshLayout = findViewById(R.id.swipeRefreshLayout)
         myWebView = findViewById(R.id.webview)
         songOverlayTextView = findViewById(R.id.songOverlayTextView)
+
+        // Initialize GestureDetector
+        gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            private val SWIPE_THRESHOLD = 100
+            private val SWIPE_VELOCITY_THRESHOLD = 100
+
+            override fun onFling(
+                e1: MotionEvent?,
+                e2: MotionEvent,
+                velocityX: Float,
+                velocityY: Float
+            ): Boolean {
+                if (e1 == null || e2 == null) {
+                    return false
+                }
+                val diffY = e2!!.y - e1!!.y
+                val diffX = e2.x - e1.x
+
+                // Check for vertical swipe up
+                if (Math.abs(diffX) < Math.abs(diffY) && Math.abs(diffY) > SWIPE_THRESHOLD && Math.abs(velocityY) > SWIPE_VELOCITY_THRESHOLD) {
+                    if (diffY > 0) {
+                        // Swipe down (handled by SwipeRefreshLayout)
+                        return false
+                    } else {
+                        // Swipe up
+                        launchMusicPlayer()
+                        return true
+                    }
+                }
+                return false
+            }
+
+            override fun onScroll(
+                e1: MotionEvent?,
+                e2: MotionEvent,
+                distanceX: Float,
+                distanceY: Float
+            ): Boolean {
+                if (e1 == null || e2 == null) {
+                    return false
+                }
+
+                val diffY = e2.y - e1.y
+                val diffX = e2.x - e1.x
+
+                // If a vertical swipe up is in progress, consume the event
+                // This prevents WebView scrolling during the "drag" phase of a potential swipe up.
+                if (Math.abs(diffX) < Math.abs(diffY) && diffY < 0) { // Swipe up
+                    return true // Consume event
+                }
+                return false // Otherwise, let WebView handle scrolling
+            }
+
+
+        })
+
+        // Attach touch listener to the WebView to detect gestures
+        myWebView.setOnTouchListener { v, event ->
+            // Pass the event to the gesture detector
+            val handledByGestureDetector = gestureDetector.onTouchEvent(event)
+
+            // If the gesture detector handled an event (like swipe up),
+            // return true to consume it and prevent WebView scrolling.
+            // Otherwise, return false to let the WebView handle its own touch events (like scrolling, clicks).
+            handledByGestureDetector
+        }
+
 
         // Load stored newLastSegment or ask user for input
         val sharedPrefs = getSharedPreferences(perfName, MODE_PRIVATE)
@@ -70,6 +147,7 @@ class MainActivity : AppCompatActivity() {
                 description: String?,
                 failingUrl: String?
             ) {
+                swipeRefreshLayout.isRefreshing = false
                 showErrorPage("$description</br>", failingUrl)
                 handleLoadError()
             }
@@ -78,6 +156,7 @@ class MainActivity : AppCompatActivity() {
                 super.onPageFinished(view, url)
                 // Page has finished loading, make the WebView visible
                 myWebView.visibility = View.VISIBLE
+                swipeRefreshLayout.isRefreshing = false
             }
 
             override fun onReceivedHttpError(
@@ -90,6 +169,14 @@ class MainActivity : AppCompatActivity() {
                 showErrorPage(message, request?.url?.toString())
                 handleLoadError()
             }
+        }
+        // Set the listener for pull-to-refresh action
+        swipeRefreshLayout.setOnRefreshListener {
+            // When the user pulls down, reload the WebView
+            myWebView.visibility = View.GONE
+            loadUrl(getWifiIpAddress())
+            //myWebView.reload()
+            // The isRefreshing will be set to false in onPageFinished
         }
 
         // Register the BroadcastReceiver
@@ -155,6 +242,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadUrl(ip: String?) {
         myWebView.loadUrl("http://$ip")
+        // Store the successfully loaded IP address
+        getSharedPreferences(perfName, MODE_PRIVATE).edit {
+            putString(prefLastIpAddress, ip)
+        }
     }
 
     private fun handleLoadError() {
@@ -256,7 +347,22 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
 
+        // --- IP Change Detection Logic ---
         val sharedPrefs = getSharedPreferences(perfName, MODE_PRIVATE)
+        val lastStoredIp = sharedPrefs.getString(prefLastIpAddress, null)
+        val currentWifiIp = getWifiIpAddress()
+
+        if (currentWifiIp != null && currentWifiIp != lastStoredIp) {
+            // IP address has changed, reload the WebView
+            loadUrl(currentWifiIp)
+        } else if ((currentWifiIp == null || currentWifiIp == "127.0.0.1")  && lastStoredIp != null) {
+            // Lost IP, or cannot determine it, and we previously had one.
+            // You might want to display an error or attempt to reload default.
+            // For now, let's just attempt to load the error page.
+            showErrorPage("Could not determine local IP address. Please check Wi-Fi connection.")
+        }
+        // --- End IP Change Detection Logic ---
+
         notificationPrompted = sharedPrefs.getBoolean(perfNotificationPrompt, false)
 
         if (!isNotificationServiceEnabled()) {
@@ -291,6 +397,17 @@ class MainActivity : AppCompatActivity() {
         }
         return false
     }
-
+    private fun launchMusicPlayer() {
+        if (musicAppPackage != null) {
+            val launchIntent = packageManager.getLaunchIntentForPackage(musicAppPackage!!)
+            if (launchIntent != null) {
+                startActivity(launchIntent)
+            } else {
+                Toast.makeText(this, "Could not launch music player.", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            Toast.makeText(this, "No music player package known yet.", Toast.LENGTH_SHORT).show()
+        }
+    }
 }
 
