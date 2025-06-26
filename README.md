@@ -1,6 +1,8 @@
 # 🚗 Gen 3 Smart Trip Logger & Dashboard
 
-An ESP32-based smart automotive companion for the Toyota Prius Gen 3. This device interfaces with the vehicle's CAN bus to monitor, log, and display trip data, while also enhancing convenience and safety with automation features.
+Why wouldn’t Toyota Prius Gen 3 have features similar to MyToyota App? <br>
+This ESP32-based device interfaces with the vehicle's CAN bus, enabling monitoring, logging, and display of trip data. It also enhances convenience and safety through automation features.
+For logging it uses Google sheet while the dashboard display is reachable as local website (using your phone as a hotspot).
 
 ---
 
@@ -57,7 +59,7 @@ An ESP32-based smart automotive companion for the Toyota Prius Gen 3. This devic
 
 To log data to Google Sheets, the device needs an active Wi-Fi connection. If no connection is available, data will be temporarily stored on the SD card until connectivity is restored.<br>
 For that you can use your phone as a hotspot. If you have Bluetooth device in your car, the phone can be automatized to turn on hotspot once its connected to that Bluetooth and disconnect when not. (e.g. Samsung have "Modes and Routines" to turn on Hotspot when Bluetooth device is connected).<br>
-When you create [Google service account](https://github.com/DejanVasic/Gen3-Trip-Logger/blob/master/Google-spreadsheet/README.md) add to that .json file fields: "_spreadsheetId_", "_cell_", "_SSID_", "_WiFipass_", "_Hostname_" like in [sample file](https://github.com/DejanVasic/Gen3-Trip-Logger/blob/master/firmware/SDcard/Settings.json) and place it on SD card.<br>
+When you create [Google service account](https://github.com/DejanVasic/Gen3-Trip-Logger/blob/master/Google-spreadsheet/README.md) add to that .json file fields: "_spreadsheetId_", "_cell_", "_SSID_", "_WiFipass_", "_Hostname_" like in [sample file](https://github.com/DejanVasic/Gen3-Trip-Logger/blob/master/firmware/SDcard/Settings.json) and place it on SD card as Settings.json.<br>
 - **spreadsheetId** is ID of Google sheet to which you log trip data.<br>Read it from url (e.g. ...spreadsheets/d/**this_is_sheet_id_for_copying_it**/edit...).
 - **cell** is spreadsheet name and first table cell address 
 - **SSID** is WiFi network name (of your phone or garage/house AP)
