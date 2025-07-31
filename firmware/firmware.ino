@@ -52,18 +52,18 @@ uint32_t odometer = 0;
 uint32_t uploadOdometer = 0;
 uint8_t upOdomInterval = 10;                // upload on every x km
 const uint32_t uploadInterval = 5 * 60000;  // upload on every x minutes
-long uploadms;
-uint8_t speed;
-uint8_t previousSpeed;
+long uploadms = 0;
+uint8_t speed = 0;
+uint8_t previousSpeed = 0;
 bool inPark = false;
-bool lockedDoors = false;
+uint8_t door_status = 0; //0= all locked; 0x1F (31) all unlocked
 bool lockedDoorsByMe = false;
 bool angleAlarm = true;
-float tankLitters;
-float injectedmLitters;
-uint16_t rpm;
-float fuelConsumption;
-float tripConsumption;
+float tankLitters = 0.0;
+float injectedmLitters = 0.0;
+uint16_t rpm = 0;
+float fuelConsumption = 0.0;
+float tripConsumption = 0.0;
 uint8_t tankIndex = 0;
 float tank[100] = { 0 };  //last 100 readings to calculate average + 1 trip start reading
 float canTankLevel = 0.0f;
@@ -71,22 +71,18 @@ uint8_t readingCount = 0;
 double litersSum = 0.0;
 TaskHandle_t GoogleTask = NULL;
 TaskHandle_t GPStask = NULL;
-//unsigned char prevGearValue = GEAR_P;
 uint16_t tripCounter = 0;
 uint8_t dimmOut = 33;  //pin
-//uint8_t uploadRetr = 0;  //Retry counter to upload on startup
 int8_t tempC = 0;
 int8_t tempRoomC = 0;
 uint8_t numSat = 0;
 int16_t steeringAngle = 0;
-unsigned long msec;
+unsigned long msec = 0;
 unsigned long msecBefore = 0;
 unsigned long msecEV = 0;
 float tripDistance = 0.0;
 float tripDistanceEV = 0.0;
 bool oddEven = true;
-//const float r1 = 105277.9f;   //97400 * 14.7/13.6 = 105277.9412
-//const float r2 = 9970000.0f;  //9970 * 1000 miliVolt
 #include "Upload.h"
 
 void unlockDoors() {
@@ -248,9 +244,9 @@ void setup() {
 
 void CB_SPEED(CAN_FRAME* can_bus) {
   speed = can_bus->data.uint8[2];
-  if (speed > 15 && !lockedDoors) {
+  if (speed > 15 && door_status != 0x0) {
     lockDoors();
-  } else if ((speed < previousSpeed - 18)) {  //collision detection, 1G = 35.32 km/h ~18 km/0.5s
+  } else if ((speed < previousSpeed - 18)) {  //collision detection, 35.32 km/h ~18 km/0.5s
     unlockDoors();
   }
   previousSpeed = speed;
@@ -262,7 +258,7 @@ void CB_DIMM(CAN_FRAME* can_bus) {
 
 void CB_GEAR(CAN_FRAME* can_bus) {
   inPark = (can_bus->data.uint8[1] == 0x20);  //0x20 -P, 0x10 -R, 0x08 -N, 0x00 -D, 0x01 -S
-  if (inPark && lockedDoors && lockedDoorsByMe) { unlockDoors(); }
+  if (inPark && door_status != 0x1F && lockedDoorsByMe) { unlockDoors(); }
 }
 
 void CB_REPLY_TANK(CAN_FRAME* can_bus) {
@@ -313,8 +309,7 @@ void CB_RPM(CAN_FRAME* can_bus) {
 }
 
 void CB_DOORS(CAN_FRAME* can_bus) { // 0= all locked; 31 (1F)= all unlocked
-  //lockedDoors = (can_bus->data.uint8[2] == 0); 
-  lockedDoors = (can_bus->data.uint8[2] != 0x1F);
+   door_status = can_bus->data.uint8[2];
 }
 
 void CB_REPLY_ID_RTEMP(CAN_FRAME* can_bus) {
@@ -328,7 +323,7 @@ void loop() {
   if (digitalRead(IGNin) == LOW) {
     //Serial.print(" Loop, IGNin = 0 ");
 
-    if (lockedDoors && lockedDoorsByMe) { unlockDoors(); }
+    if (door_status != 0x1F && lockedDoorsByMe) { unlockDoors(); }
     upLoad2Google(NULL);  // less than 10 secondes passed after last upload //upLoadTask();
   } else if (msec - msecBefore >= 500) {
     msecBefore = msec;

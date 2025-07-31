@@ -39,19 +39,19 @@ HardwareSerial gpsSerial(2);
 #endif
 const uint8_t chipSelect = 5;
 String WIFI_SSID = "";
-String WIFI_PASSWORD;
-String PROJECT_ID;
-String CLIENT_EMAIL;
-char PRIVATE_KEY[2048];
-char HOSTNAME[32];
-String spreadsheetId;
-String cell;  //Spreadsheet name and first table cell
+String WIFI_PASSWORD = "";
+String PROJECT_ID = "";
+String CLIENT_EMAIL = "";
+char PRIVATE_KEY[2048] = "";
+char HOSTNAME[32] = "";
+String spreadsheetId = "";
+String cell = "";  //Spreadsheet name and first table cell
 //unsigned long epochTime;
 //unsigned long millisOnEpoch;
 String dateTime = "0";
-double latitude;
-double longitude;
-float altitude;
+double latitude = 0.0;
+double longitude = 0.0;
+float altitude = 0.0;
 //bool mDNSInitialized = false;
 bool uploading = false;
 
