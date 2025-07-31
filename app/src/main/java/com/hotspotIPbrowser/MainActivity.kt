@@ -12,6 +12,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.view.GestureDetector
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
@@ -33,24 +34,32 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 class MainActivity : AppCompatActivity() {
     private lateinit var swipeRefreshLayout: SwipeRefreshLayout
     private lateinit var myWebView: WebView
-    private var retryCount = 0
+    //private var retryCount = 0
     private val handler = Handler(Looper.getMainLooper())
     private var newLastSegment = 89 // Default value, will be loaded or set by user
     private val perfName = "AppSettings"
     private val prefLastSegment = "newLastSegment"
     private val prefLastIpAddress = "lastIpAddress"
+    private val prefLastMusicApp = "lastMusicApp"
     private lateinit var songOverlayTextView: TextView
     private val perfNotificationPrompt = "notification_prompted"
     private var notificationPrompted = false
     private var musicAppPackage: String? = null
     private lateinit var gestureDetector: GestureDetector
+    private var isScreenOnReceiverRegistered = false
     private val musicInfoReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             var songInfo = intent?.getStringExtra("songInfo")
             musicAppPackage = intent?.getStringExtra("packageName") // Get the package name
             songOverlayTextView.text = songInfo
-            songOverlayTextView.visibility =
-                if (songInfo.isNullOrEmpty()) View.GONE else View.VISIBLE
+            songOverlayTextView.visibility = if (songInfo.isNullOrEmpty()) View.GONE else View.VISIBLE
+
+            // Save the last music app package
+            if (!musicAppPackage.isNullOrEmpty()) {
+                getSharedPreferences(perfName, MODE_PRIVATE).edit {
+                    putString(prefLastMusicApp, musicAppPackage)
+                }
+            }
         }
     }
 
@@ -198,6 +207,12 @@ class MainActivity : AppCompatActivity() {
             window.decorView.systemUiVisibility =
                 View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
         }
+        if (!isScreenOnReceiverRegistered) {
+            registerReceiver(screenOnReceiver, IntentFilter(Intent.ACTION_SCREEN_ON))
+            isScreenOnReceiverRegistered = true
+        }
+
+
     }
 
     private fun showErrorPage(errorMessage: String, failingUrl: String? = null) {
@@ -248,13 +263,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+//    private fun handleLoadError() {
+//        if (retryCount < 10) {
+//            retryCount++
+//        }
+//        handler.postDelayed({
+//            loadUrl(getWifiIpAddress())
+//        }, 2000L * retryCount) // Exponential backoff
+//    }
+
     private fun handleLoadError() {
-        if (retryCount < 10) {
-            retryCount++
-        }
         handler.postDelayed({
             loadUrl(getWifiIpAddress())
-        }, 2000L * retryCount) // Exponential backoff
+        }, 3000L)
     }
 
     private fun getWifiIpAddress(): String? {
@@ -287,9 +308,15 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        //launchLauncher()
         // Clean up handler to prevent memory leaks
         handler.removeCallbacksAndMessages(null)
         LocalBroadcastManager.getInstance(this).unregisterReceiver(musicInfoReceiver)
+        if (isScreenOnReceiverRegistered) {
+            unregisterReceiver(screenOnReceiver)
+            isScreenOnReceiverRegistered = false
+        }
+
     }
 
 
@@ -322,11 +349,7 @@ class MainActivity : AppCompatActivity() {
                 loadUrl(getWifiIpAddress())//reload
             } catch (_: NumberFormatException) {
                 // Handle the exception if the input is not a valid number
-                Toast.makeText(
-                    this,
-                    "Invalid input. Number must be between 1 and 255",
-                    Toast.LENGTH_LONG
-                ).show()
+                Toast.makeText(this, "Invalid input. Number must be between 1 and 255", Toast.LENGTH_LONG).show()
                 askForLastSegment()
             }
         }
@@ -344,6 +367,7 @@ class MainActivity : AppCompatActivity() {
         startActivity(intent)
     }
 
+
     override fun onResume() {
         super.onResume()
 
@@ -351,6 +375,8 @@ class MainActivity : AppCompatActivity() {
         val sharedPrefs = getSharedPreferences(perfName, MODE_PRIVATE)
         val lastStoredIp = sharedPrefs.getString(prefLastIpAddress, null)
         val currentWifiIp = getWifiIpAddress()
+//        val filter = IntentFilter(Intent.ACTION_SCREEN_ON)
+//        registerReceiver(screenOnReceiver, filter)
 
         if (currentWifiIp != null && currentWifiIp != lastStoredIp) {
             // IP address has changed, reload the WebView
@@ -370,18 +396,63 @@ class MainActivity : AppCompatActivity() {
                 requestNotificationAccess()
                 sharedPrefs.edit { putBoolean(perfNotificationPrompt, true) }
             } else {
-                Toast.makeText(
-                    this,
-                    "Please grant notification access for music info.",
-                    Toast.LENGTH_LONG
-                ).show()
+                Toast.makeText( this, "Please grant notification access for music info.", Toast.LENGTH_LONG).show()
                 sharedPrefs.edit { putBoolean(perfNotificationPrompt, false) }
             }
 
         } else {
             startService(Intent(this, MusicNotificationListenerService::class.java))
         }
+
     }
+
+    private val screenOnReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == Intent.ACTION_SCREEN_ON) {
+                val prefs = getSharedPreferences(perfName, MODE_PRIVATE)
+                val lastMusicApp = prefs.getString("lastMusicApp", null)
+
+                if (!lastMusicApp.isNullOrEmpty()) {
+                    val launchIntent = packageManager.getLaunchIntentForPackage(lastMusicApp)
+                    launchIntent?.addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                                Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED or
+                                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                                Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+                    )
+
+                    // Only start activity if not already running
+                    if (launchIntent != null) {
+                        if (musicAppPackage != null && isAppRunning(musicAppPackage!!)) {
+                            startActivity(launchIntent)
+                        }
+                        // Wait a bit before sending PLAY
+                        handler.postDelayed({
+                            sendMediaPlayCommand()
+                        }, 3000)
+                    } else {
+                        sendMediaPlayCommand()
+                    }
+                }
+            }
+        }
+    }
+
+
+    private fun isAppRunning(packageName: String): Boolean {
+        val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val processes = activityManager.runningAppProcesses ?: return false
+        return processes.any { it.processName == packageName }
+    }
+    private fun sendMediaPlayCommand() {
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        val downEvent = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY)
+        val upEvent = KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY)
+
+        audioManager.dispatchMediaKeyEvent(downEvent)
+        audioManager.dispatchMediaKeyEvent(upEvent)
+    }
+
 
     private fun isNotificationServiceEnabled(): Boolean {
         val packageName = packageName
@@ -398,6 +469,11 @@ class MainActivity : AppCompatActivity() {
         return false
     }
     private fun launchMusicPlayer() {
+        val sharedPrefs = getSharedPreferences(perfName, MODE_PRIVATE)
+        if (musicAppPackage == null) {
+            musicAppPackage = sharedPrefs.getString(prefLastMusicApp, null)
+        }
+
         if (musicAppPackage != null) {
             val launchIntent = packageManager.getLaunchIntentForPackage(musicAppPackage!!)
             if (launchIntent != null) {
@@ -409,5 +485,13 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "No music player package known yet.", Toast.LENGTH_SHORT).show()
         }
     }
+
+//    private fun launchLauncher() {
+//        val intent = Intent(Intent.ACTION_MAIN)
+//        intent.addCategory(Intent.CATEGORY_HOME)
+//        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+//        startActivity(intent)
+//    }
+
 }
 

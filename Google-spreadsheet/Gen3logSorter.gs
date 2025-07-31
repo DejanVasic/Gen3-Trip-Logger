@@ -183,7 +183,7 @@ function Sorter() {
             }
           }
           Tabela[i][3] = tempTank
-        } else if (Tabela[i][3] - 5 > Tabela[i + 1][3]) {//tank refill?
+        } else if (Tabela[i][3] - 5 > Tabela[i + 1][3] && Tabela[i][8] != Tabela[i + 1][8] ) {//tank refill?
           TankRefill = i
           for (var a = i + 1; a < lastRow; a++) {
             if (Tabela[a][17].toString().startsWith("Av:")) { //previous refill

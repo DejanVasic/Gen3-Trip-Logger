@@ -147,7 +147,8 @@ void setup() {
   pinMode(gpsOn, OUTPUT);
   pinMode(dimmOut, OUTPUT);
   pinMode(IGNin, INPUT_PULLDOWN);  //INPUT
-
+  GoogleTask = NULL;
+  GPStask = NULL;
 
   if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
     go2DeepSleep();
@@ -180,7 +181,7 @@ void setup() {
       delay(50);
       digitalWrite(LED_BUILTIN, HIGH);
       delay(50);
-      digitalWrite(gpsOn, 1);
+      digitalWrite(gpsOn, HIGH);
       readSettings();
       gpsSerial.begin(GPS_BAUD, SERIAL_8N1, RXD2, TXD2);
       //Serial.println(gpsSerial.available());
@@ -311,14 +312,16 @@ void CB_RPM(CAN_FRAME* can_bus) {
   if (rpmTemp < 6000) rpm = rpmTemp;
 }
 
-void CB_DOORS(CAN_FRAME* can_bus) {
-  lockedDoors = (can_bus->data.uint8[2] == 0);
+void CB_DOORS(CAN_FRAME* can_bus) { // 0= all locked; 31 (1F)= all unlocked
+  //lockedDoors = (can_bus->data.uint8[2] == 0); 
+  lockedDoors = (can_bus->data.uint8[2] != 0x1F);
 }
 
 void CB_REPLY_ID_RTEMP(CAN_FRAME* can_bus) {
   tempRoomC = can_bus->data.uint8[3] * 63.75 / 255 - 6.5;
 }
 // \\Callback functions:
+
 
 void loop() {
   msec = millis();

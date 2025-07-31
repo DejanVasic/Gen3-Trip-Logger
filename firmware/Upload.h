@@ -2,6 +2,7 @@
 
   Adapted from the examples of the Libraryes for Arduino devices
   Some handy tutorials: 
+ 
   https://github.com/mobizt/ESP-Google-Sheet-Client
   https://randomnerdtutorials.com/esp32-neo-6m-gps-module-arduino/
   https://randomnerdtutorials.com/esp32-microsd-card-arduino/
@@ -23,7 +24,7 @@
 //#include <ESPmDNS.h>
 //#include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>  //1280*720
-//#include "mdns.h"  //it doesn't work as expected so hostname does not need to be settled for bonjour browsing. I'll use my app for browsing using IP address
+//#include "mdns.h"  //it doesn't work as expected so I'll use my app for browsing using IP address
 #include "soc/rtc_cntl_reg.h"
 #include "soc/rtc.h"
 #include "driver/rtc_io.h"
@@ -42,7 +43,7 @@ String WIFI_PASSWORD;
 String PROJECT_ID;
 String CLIENT_EMAIL;
 char PRIVATE_KEY[2048];
-//char HOSTNAME[32];
+char HOSTNAME[32];
 String spreadsheetId;
 String cell;  //Spreadsheet name and first table cell
 //unsigned long epochTime;
@@ -148,8 +149,8 @@ void readSettings() {
     if (json.get(jsonData, "WiFipass")) WIFI_PASSWORD = jsonData.stringValue;
     if (json.get(jsonData, "spreadsheetId")) spreadsheetId = jsonData.stringValue;
     if (json.get(jsonData, "cell")) cell = jsonData.stringValue;
-    /*     if (json.get(jsonData, "Hostname")) tempChar = jsonData.stringValue;
-    tempChar.toCharArray(HOSTNAME, sizeof(HOSTNAME)); */
+        if (json.get(jsonData, "Hostname")) tempChar = jsonData.stringValue;
+    tempChar.toCharArray(HOSTNAME, sizeof(HOSTNAME));
     if (json.get(jsonData, "private_key")) tempChar = jsonData.stringValue;
     tempChar.replace("\\n", "\n");
     tempChar.toCharArray(PRIVATE_KEY, sizeof(PRIVATE_KEY));
@@ -160,35 +161,6 @@ void readSettings() {
   }
 }
 
-
-
-// valueRange.set("values/[0]/[0]", getTime());
-// valueRange.set("values/[1]/[0]", msec);
-// valueRange.set("values/[3]/[0]", odometer);
-// valueRange.set("values/[5]/[0]", tankLitters);
-// valueRange.set("values/[6]/[0]", dateTime);
-// valueRange.set("values/[7]/[0]", latitude);
-// valueRange.set("values/[8]/[0]", longitude);
-// valueRange.set("values/[9]/[0]", altitude);
-// valueRange.set("values/[10]/[0]", tripCounter);
-// valueRange.set("values/[11]/[0]", tripDistance);
-// valueRange.set("values/[12]/[0]", tripConsumption);
-// valueRange.set("values/[13]/[0]", tripDistanceEV);
-// valueRange.set("values/[14]/[0]", msecEV);
-
-/*valueRange.set("values/[0]/[0]", getTime());
-  valueRange.set("values/[1]/[0]", msec);
-  valueRange.set("values/[2]/[0]", odometer);
-  valueRange.set("values/[3]/[0]", tankLitters);
-  valueRange.set("values/[4]/[0]", dateTime);
-  valueRange.set("values/[5]/[0]", latitude);
-  valueRange.set("values/[6]/[0]", longitude);
-  valueRange.set("values/[7]/[0]", altitude);
-  valueRange.set("values/[8]/[0]", tripCounter);
-  valueRange.set("values/[9]/[0]", tripDistance);
-  valueRange.set("values/[10]/[0]", tripConsumption);
-  valueRange.set("values/[11]/[0]", tripDistanceEV);
-  valueRange.set("values/[12]/[0]", msecEV); */
 //      0           1           2           3             4            5      6    7       8          9               10                11              12           13          14
 //Unix Date,	Milliseconds,	Odometer Km,	Tank l,	GPS DateTime (UTC),	LAT,	LONG,	ALT,	TRIP #,	Trip distance,	Trip consumption	|Trip time,  Internet DateTime,	Av speed,	Av Consumption
 
@@ -225,7 +197,6 @@ void write2SD() {
     file.println("");
     file.close();
     Serial.println(F("Data appended to file."));
-    //status = "Data appended\nto file.";
   } else {
     Serial.println(F("Error opening file for append."));
   }
@@ -246,13 +217,16 @@ void write2SD() {
 void connect2WIFI() {
 
   if (WiFi.status() == WL_CONNECTED || WIFI_SSID == "") {  //&& mDNSInitialized) {
-    // if (epochTime > 0) epochTime += (int)((msec - millisOnEpoch) / 1000);  //update known epoch time with msec
     return;
   } else {
     //mDNSInitialized = false;
     if (WiFi.status() != WL_CONNECTED) {
-      // WiFi.setHostname(HOSTNAME);
-      WiFi.setHostname("Prius CanReader");
+
+      WiFi.disconnect(true);  // Clear any stale connection
+      vTaskDelay(100 / portTICK_RATE_MS);
+
+      WiFi.setHostname(HOSTNAME);
+      //WiFi.setHostname("Prius CanReader");
       WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     }
     //uint8_t step = 0;
@@ -290,14 +264,14 @@ void go2Sleep() {
   esp_sleep_enable_timer_wakeup(48 * 60 * 60 * 1000000ULL);  // 2 days in μs
   //esp_sleep_enable_timer_wakeup(60000000);  // test
   esp_sleep_enable_ext1_wakeup(GPIO_SEL_34, ESP_EXT1_WAKEUP_ANY_HIGH);
-  Serial.println(F("DREMAM"));
+  //Serial.println(F("DREMAM"));
   esp_deep_sleep_start();
 }
 
 void go2DeepSleep() {
   WiFi.disconnect(true);
-  gpio_hold_dis (gpsOn);
-  digitalWrite(gpsOn, 0);
+  gpio_hold_dis(gpsOn);
+  digitalWrite(gpsOn, LOW);
   esp_sleep_enable_ext1_wakeup(GPIO_SEL_34, ESP_EXT1_WAKEUP_ANY_HIGH);
   esp_deep_sleep_start();
 }
@@ -497,8 +471,5 @@ void webGps(void* parameter) {
 
     vTaskDelay(450 / portTICK_RATE_MS);
     connect2WIFI();
-    /*     if (digitalRead(IGNin) == LOW) {
-      go2Sleep();
-    } */
   }
 }
