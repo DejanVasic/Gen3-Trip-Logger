@@ -223,7 +223,7 @@ function Sorter() {
   }
 
   LastTrip += Number(Put).toFixed(1) + " km "
-  LastTrip += (100 * Litara / Number(Put)).toFixed(1) + " l/100km  "
+  LastTrip += (100 * Litara / Number(Put)).toFixed(2) + " l/100km  "
 
   if (TankRefill) {
     Tabela[TankRefill][17] += "\n" + PriusSh.getRange(1, 18).getValue()
