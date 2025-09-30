@@ -10,13 +10,16 @@ The firmware is developed for ESP32 boards, specifically tested with the Wemos L
 
 * **CAN Bus Monitoring:** Intercepts and decodes various CAN messages from the vehicle, including:
     * Odometer readings 
-    * Vehicle speed 
+    * Vehicle speed
+    * Memorized cruise control speed
     * Light dimmer status 
     * Gear position 
     * Steering wheel angle 
-    * Door lock status 
+    * Door lock status
+    * Windows opened status
     * Engine RPM 
-    * Engine temperature 
+    * Engine temperature
+    * Inverter coolant temperature
     * Fuel tank level 
     * Fuel injection volume 
     * Cabin temperature 
@@ -39,8 +42,10 @@ The firmware is developed for ESP32 boards, specifically tested with the Wemos L
     * **Automatic Door Locking:** Locks doors when speed exceeds 15 km/h. 
     * **Collision Detection:** Unlocks doors if a rapid deceleration (indicating a potential collision) is detected. 
     * **Automatic Door Unlocking:** Unlocks doors when the vehicle is put in "Park" and doors were locked by the system. 
-    * **Steering Angle Alarm:** Triggers a buzzer sound once if the steering angle is outside a certain range, potentially indicating an issue or an unusual maneuver. 
-    * **Dimmable Output:** Controls an output pin (e.g., for lights) based on the vehicle's dimmer signal. 
+    * **Steering Angle Alarm:** Triggers a buzzer sound once on car start if the steering angle is outside a certain range, potentially indicating an issue or an unusual maneuver. 
+    * **Window Opened Alarm:** Triggers a buzzer sound once on car turn off if any rear window is opened.
+    * **Door Opened Alarm:** Blinks the hazard lights once when the first door is opened after the car is turned off, providing an immediate warning to other drivers.
+    * **Dimmable Output:** Controls an output pin (e.g., for HeadUnit lights) based on the vehicle's dimmer signal. 
     * **Deep Sleep Mode:** Enters a deep sleep mode to conserve power when the ignition is off, with wake-up triggered by ignition or a timer. 
 
 * **Web Server Interface:**
@@ -60,7 +65,12 @@ This project relies on the following third-party Arduino libraries:
 * **`SPI.h` and `SD.h`:** For SD card communication.
 * **`FS.h`:** File system library.
 
-### `Settings.json` Configuration
+Web Assets (for the built-in server):
+* **`orbitron.woff2`:** https://fonts.googleapis.com/css2?family=Orbitron font.
+* **`script.js`:** gauge.min.js library from https://github.com/Mikhus/canvas-gauges.git (used for displaying gauges on the served web page).
+* **`graphics.svg`:** created from icon library https://fontawesome.com/v5/search?ic=free and https://upload.wikimedia.org/wikipedia/commons/8/89/Toyota_Prius_logo.svg
+
+## `Settings.json` Configuration
 
 Sample of a file named `Settings.json` in the root directory of your MicroSD card with the following content. Replace the placeholder values with your actual Wi-Fi credentials and Google Sheet API keys.
 

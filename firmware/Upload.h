@@ -28,7 +28,7 @@
 #include "soc/rtc_cntl_reg.h"
 #include "soc/rtc.h"
 #include "driver/rtc_io.h"
-
+#include <HTTPClient.h>
 TinyGPSPlus gps;
 HardwareSerial gpsSerial(2);
 #define RXD2 16
@@ -48,13 +48,15 @@ String spreadsheetId = "";
 String cell = "";  //Spreadsheet name and first table cell
 //unsigned long epochTime;
 //unsigned long millisOnEpoch;
-String dateTime = "0";
-double latitude = 0.0;
-double longitude = 0.0;
-float altitude = 0.0;
+char dateTime[20] = { 0 };
+//String dateTime = "0";
+volatile double latitude = 0.0;
+volatile double longitude = 0.0;
+volatile float altitude = 0.0;
 //bool mDNSInitialized = false;
 bool uploading = false;
-
+bool noSettings = true;
+uint8_t wiFiConnection = 0;  //0 never connected, 1 first time connected, 2 reconnected
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
 // Create an Event Source on /events
@@ -64,31 +66,14 @@ FirebaseJsonData readings;
 // Token Callback function
 void tokenStatusCallback(TokenInfo info);
 void lockDoors();  // Function declaration
+void checkSDVersion();
 
-// UBX Power Management Messages (more reliable for u-blox)
-/* const byte UBX_POWER_DOWN[] = {
-  0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0x00, 0x00, 0x02, 0x00, 0x10, 0x68
-}; */
-// Power Down until wakeup
-/* const byte UBX_PSM[] = {
-  0xB5, 0x62, 0x06, 0x11, 0x02, 0x00, 0x08, 0x01, 0x22, 0x92
-};  */
-// Cyclic Power Save Mode (1Hz)
-
-// Send UBX binary command
-/* void sendUBX(const byte* message, int len) {
-  gpsSerial.write(0xFF);  // Sync
-  for (int i = 0; i < len; i++) {
-    gpsSerial.write(message[i]);
-  }
-}
- */
 // Function that gets current epoch time in 3 attempts
 unsigned long getTime() {
   time_t now;
   struct tm timeinfo;
   uint8_t step = 0;
-  while (!getLocalTime(&timeinfo) && step <= 3) {
+  while (!getLocalTime(&timeinfo) && step <= 1) {
     step++;
     vTaskDelay(50 / portTICK_RATE_MS);
     Serial.print(F(" step: "));
@@ -98,31 +83,49 @@ unsigned long getTime() {
   return now;
 }
 
-
-
 String getCanReadings() {
-  static FirebaseJson json;
-  json.clear();
-  //json.set("odometer", odometer);
-  json.set("rpm", rpm);
-  json.set("tank", tankLitters);
-  json.set("temp", tempC);
-  json.set("dist", tripDistance);
-  json.set("cons", tripConsumption);
-  json.set("msec", msec);
-  json.set("sAng", steeringAngle);
-  json.set("numSat", numSat);
-  json.set("speed", speed);
-  json.set("tempRoomC", tempRoomC);
-  json.set("tripCounter", tripCounter);
-  //json.set("vrata", lockedDoorsIn);
+  FirebaseJson json;  // local, re-entrant
+
+  // Snapshot shared globals in a short critical section
+  portENTER_CRITICAL(&canReadMux);
+  unsigned long msec_local = msec;
+  uint16_t rpm_local = rpm;
+  float tank_local = tankLitters;
+  int8_t temp_local = tempC;
+  int8_t invTemp_local = invTemp;
+  float dist_local = tripDistance;
+  float cons_local = tripConsumption;
+  int16_t sAng_local = steeringAngle;
+  uint8_t numSat_local = numSat;
+  uint8_t speed_local = speed;
+  uint8_t ccSpeed_local = ccSpeed;
+  uint16_t tc_local = tripCounter;
+  uint8_t fss_local = fss;
+  int8_t tempRoomC_local = tempRoomC;
+  portEXIT_CRITICAL(&canReadMux);
+
+  // Build JSON from the local snapshot
+  json.set("rpm", rpm_local);
+  json.set("tank", tank_local);
+  json.set("temp", temp_local);
+  json.set("invTemp", invTemp_local);
+  json.set("dist", dist_local);
+  json.set("cons", cons_local);
+  json.set("msec", msec_local);
+  json.set("sAng", sAng_local);
+  json.set("numSat", numSat_local);
+  json.set("speed", speed_local);
+  json.set("ccSpeed", ccSpeed_local);
+  json.set("tripCounter", (tc_local + fss_local / 10.0));
+  json.set("tempRoomC", tempRoomC_local);
+
   String jsonString;
   if (json.toString(jsonString)) {
-    //Serial.println(jsonString);
-
     return jsonString;
   }
-  return "{}";  // Return empty JSON on error
+  // Fallback
+  Serial.println("getCanReadings: json.toString() failed");
+  return "{}";
 }
 
 void readSettings() {
@@ -149,13 +152,14 @@ void readSettings() {
     if (json.get(jsonData, "WiFipass")) WIFI_PASSWORD = jsonData.stringValue;
     if (json.get(jsonData, "spreadsheetId")) spreadsheetId = jsonData.stringValue;
     if (json.get(jsonData, "cell")) cell = jsonData.stringValue;
-        if (json.get(jsonData, "Hostname")) tempChar = jsonData.stringValue;
+    if (json.get(jsonData, "Hostname")) tempChar = jsonData.stringValue;
     tempChar.toCharArray(HOSTNAME, sizeof(HOSTNAME));
     if (json.get(jsonData, "private_key")) tempChar = jsonData.stringValue;
     tempChar.replace("\\n", "\n");
     tempChar.toCharArray(PRIVATE_KEY, sizeof(PRIVATE_KEY));
     if (json.get(jsonData, "project_id")) PROJECT_ID = jsonData.stringValue;
     if (json.get(jsonData, "client_email")) CLIENT_EMAIL = jsonData.stringValue;
+    noSettings = false;
   } else {
     Serial.println(F("Settings.json does not exist"));
   }
@@ -165,58 +169,80 @@ void readSettings() {
 //Unix Date,	Milliseconds,	Odometer Km,	Tank l,	GPS DateTime (UTC),	LAT,	LONG,	ALT,	TRIP #,	Trip distance,	Trip consumption	|Trip time,  Internet DateTime,	Av speed,	Av Consumption
 
 void write2SD() {
+  char dtbuf[20] = { 0 };
+  portENTER_CRITICAL(&canReadMux);
+  unsigned long msec_local = msec;
+  uint32_t odom_local = odometer;
+  float tank_local = tankLitters;
+  //dateTime.toCharArray(dtbuf, sizeof(dtbuf));
+  //char dtbuf[20] = dateTime;
+  strncpy(dtbuf, dateTime, sizeof(dtbuf));
+  dtbuf[sizeof(dtbuf) - 1] = '\0';
+  double latitude_local = latitude;
+  double longitude_local = longitude;
+  float altitude_local = altitude;
+  uint16_t tc_local = tripCounter;
+  float dist_local = tripDistance;
+  float cons_local = tripConsumption;
+  float tdEV_local = tripDistanceEV;
+  unsigned long msecEV_local = msecEV;
+  portEXIT_CRITICAL(&canReadMux);
+
   // Open the file in append mode
   File file = SD.open("/GPSdata.tsv", FILE_APPEND);
   if (file) {
     // Write the data to the file
     file.print(getTime());
     file.print("\t");
-    file.print(msec);
+    file.print(msec_local);
     file.print("\t");
-    file.print(odometer);
+    file.print(odom_local);
     file.print("\t");
-    file.print(tankLitters);
+    file.print(tank_local);
     file.print("\t");
-    file.print(dateTime);
+    file.print(dtbuf);
     file.print("\t");
-    file.print(latitude, 9);
+    file.print(latitude_local, 9);
     file.print("\t");
-    file.print(longitude, 9);
+    file.print(longitude_local, 9);
     file.print("\t");
-    file.print(altitude);
+    file.print(altitude_local);
     file.print("\t");
-    file.print(tripCounter);
+    file.print(tc_local);
     file.print("\t");
-    file.print(tripDistance);
+    file.print(dist_local);
     file.print("\t");
-    file.print(tripConsumption);
+    file.print(cons_local);
     file.print("\t");
-    file.print(tripDistanceEV);
+    file.print(tdEV_local);
     file.print("\t");
-    file.print(msecEV);
+    file.print(msecEV_local);
     file.println("");
     file.close();
     Serial.println(F("Data appended to file."));
   } else {
     Serial.println(F("Error opening file for append."));
+    tone(buzzer, 2000, 100);
+    vTaskDelay(150 / portTICK_RATE_MS);
+    tone(buzzer, 2000, 100);
+    vTaskDelay(150 / portTICK_RATE_MS);
+    tone(buzzer, 2000, 100);
+    vTaskDelay(100 / portTICK_RATE_MS);
   }
 }
 
-/* void updateMdns() {
-  esp_err_t err = mdns_init();
-  if (err) {
-    printf("MDNS Init failed: %d\n", err);
-    return;
-  }
-  mdns_hostname_set(HOSTNAME);
-  mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
-  mdns_service_instance_name_set("_http", "_tcp", "Prius ESP32 Can reader");
-  mDNSInitialized = true;
-} */
 
 void connect2WIFI() {
 
   if (WiFi.status() == WL_CONNECTED || WIFI_SSID == "") {  //&& mDNSInitialized) {
+    if (wiFiConnection == 0) {
+      wiFiConnection = 1;
+      Serial.print(F("RRSI: "));
+      Serial.println(WiFi.RSSI());
+      Serial.print(F(" CONNECTED: "));
+      Serial.println(WiFi.localIP());
+      configTime(0, 0, "0.europe.pool.ntp.org", "rs.pool.ntp.org", "pool.ntp.org");
+    }
     return;
   } else {
     //mDNSInitialized = false;
@@ -224,36 +250,18 @@ void connect2WIFI() {
 
       WiFi.disconnect(true);  // Clear any stale connection
       vTaskDelay(100 / portTICK_RATE_MS);
-
       WiFi.setHostname(HOSTNAME);
-      //WiFi.setHostname("Prius CanReader");
       WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+      if (WiFi.waitForConnectResult(3000) != WL_CONNECTED) {
+        Serial.print(F("WIFI connecting to "));
+        Serial.println(WIFI_SSID);
+      }
+      /*       if (WiFi.status() == WL_CONNECTED) {
+
+      } */
     }
-    //uint8_t step = 0;
-    Serial.print(F("WIFI connecting to "));
-    Serial.print(WIFI_SSID);
-    Serial.print(F("\nESP32 IP Address: "));
-    Serial.println(WiFi.localIP());
-    //Serial.print(F("ESP32 HostName: "));
-    //Serial.println(WiFi.getHostname());
-    Serial.print(F("RRSI: "));
-    Serial.println(WiFi.RSSI());
-
-    //if (epochTime == 0) {
-    configTime(0, 0, "0.europe.pool.ntp.org", "rs.pool.ntp.org", "pool.ntp.org");
-    //  epochTime = getTime();
-    //  millisOnEpoch = msec;
-    //}
-
-    Serial.print(F(" CONNECTED: "));
-    Serial.println(WiFi.localIP());
-    IPAddress ip = WiFi.localIP();
-    char ipAddress[20];
-    sprintf(ipAddress, "IP: %d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
-    //updateMdns();
   }
 }
-
 
 void go2Sleep() {
   digitalWrite(gpsOn, HIGH);
@@ -264,8 +272,12 @@ void go2Sleep() {
   esp_sleep_enable_timer_wakeup(48 * 60 * 60 * 1000000ULL);  // 2 days in μs
   //esp_sleep_enable_timer_wakeup(60000000);  // test
   esp_sleep_enable_ext1_wakeup(GPIO_SEL_34, ESP_EXT1_WAKEUP_ANY_HIGH);
-  //Serial.println(F("DREMAM"));
+  Serial.println(F("DREMAM"));
+  //if (digitalRead(IGNin) == LOW) {
+  //  esp_deep_sleep(1000);
+  //} else {
   esp_deep_sleep_start();
+  //}
 }
 
 void go2DeepSleep() {
@@ -279,15 +291,17 @@ void go2DeepSleep() {
 void upLoad2Google(void* parameter) {
   //if (msec > uploadms + 10000) { upLoad2Google(NULL); }  // less than 10 secondes passed after last upload //upLoadTask();
 
-  if (uploading) { return; }
+  if (uploading) return;
   uploading = true;
   vTaskDelay(1 / portTICK_RATE_MS);
-  //status = "upload";
-  connect2WIFI();
+  //connect2WIFI();
   if (WiFi.status() != WL_CONNECTED) {
     write2SD();
     uploading = false;
     if (digitalRead(IGNin) == LOW) {
+      tone(buzzer, 2000, 100);
+      vTaskDelay(150 / portTICK_RATE_MS);
+      tone(buzzer, 2000, 100);
       go2Sleep();
     }
     GoogleTask = NULL;
@@ -306,21 +320,37 @@ void upLoad2Google(void* parameter) {
   FirebaseJson response;
   FirebaseJson valueRange;
   valueRange.add("majorDimension", "COLUMNS");
+  char dtbuf[20];
+  portENTER_CRITICAL(&canReadMux);
+  unsigned long msec_local = msec;
+  uint32_t odom_local = odometer;
+  float tank_local = tankLitters;
+  strncpy(dtbuf, dateTime, sizeof(dtbuf));
+  dtbuf[sizeof(dtbuf) - 1] = '\0';
+  double latitude_local = latitude;
+  double longitude_local = longitude;
+  float altitude_local = altitude;
+  uint16_t tc_local = tripCounter;
+  float dist_local = tripDistance;
+  float cons_local = tripConsumption;
+  float tdEV_local = tripDistanceEV;
+  unsigned long msecEV_local = msecEV;
+  portEXIT_CRITICAL(&canReadMux);
 
   // Set live data first
   valueRange.set("values/[0]/[0]", getTime());
-  valueRange.set("values/[1]/[0]", msec);
-  valueRange.set("values/[2]/[0]", odometer);
-  valueRange.set("values/[3]/[0]", tankLitters);
-  valueRange.set("values/[4]/[0]", dateTime);
-  valueRange.set("values/[5]/[0]", latitude);
-  valueRange.set("values/[6]/[0]", longitude);
-  valueRange.set("values/[7]/[0]", altitude);
-  valueRange.set("values/[8]/[0]", tripCounter);
-  valueRange.set("values/[9]/[0]", tripDistance);
-  valueRange.set("values/[10]/[0]", tripConsumption);
-  valueRange.set("values/[11]/[0]", tripDistanceEV);
-  valueRange.set("values/[12]/[0]", msecEV);
+  valueRange.set("values/[1]/[0]", msec_local);
+  valueRange.set("values/[2]/[0]", odom_local);
+  valueRange.set("values/[3]/[0]", tank_local);
+  valueRange.set("values/[4]/[0]", dtbuf);
+  valueRange.set("values/[5]/[0]", latitude_local);
+  valueRange.set("values/[6]/[0]", longitude_local);
+  valueRange.set("values/[7]/[0]", altitude_local);
+  valueRange.set("values/[8]/[0]", tc_local);
+  valueRange.set("values/[9]/[0]", dist_local);
+  valueRange.set("values/[10]/[0]", cons_local);
+  valueRange.set("values/[11]/[0]", tdEV_local);
+  valueRange.set("values/[12]/[0]", msecEV_local);
   uint8_t liveData = 1;
   bool gUp = false;
   uint32_t totalRowCount = 0;
@@ -388,6 +418,7 @@ void upLoad2Google(void* parameter) {
   }
   if (gUp) {
     if (SD.exists("/GPSdata.tsv")) {
+      tone(buzzer, 2000, 100);
       valueRange.clear();
       SD.remove("/GPSdata.tsv");
       if (!SD.exists("/GPSdata.tsv")) Serial.println(F("File /GPSdata.tsv deleted successfully"));
@@ -395,12 +426,15 @@ void upLoad2Google(void* parameter) {
   } else {
     Serial.println(GSheet.errorReason());
     write2SD();
+    tone(buzzer, 2000, 100);
+    vTaskDelay(150 / portTICK_RATE_MS);
+    tone(buzzer, 2000, 100);
+    vTaskDelay(100 / portTICK_RATE_MS);
   }
   uploading = false;
   if (digitalRead(IGNin) == LOW) {
     go2Sleep();
   }
-
   GoogleTask = NULL;
   vTaskDelete(NULL);
 }
@@ -415,61 +449,187 @@ void tokenStatusCallback(TokenInfo info) {
   }
 }
 
-String formatDateTime(TinyGPSDate date, TinyGPSTime time) {
+void formatDateTimeBuf(char* out, size_t outSize, TinyGPSDate date, TinyGPSTime time) {
+  if (!out || outSize == 0) return;
+  // snprintf ensures no overflow and NUL-termination
+  snprintf(out, outSize, "%02d.%02d.%04d %02d:%02d:%02d",
+           date.day(), date.month(), date.year(),
+           time.hour(), time.minute(), time.second());
+}
+
+/* String formatDateTime(TinyGPSDate date, TinyGPSTime time) {
   char dateTime[20];
   sprintf(dateTime, "%02d.%02d.%04d %02d:%02d:%02d",
           date.day(), date.month(), date.year(),
           time.hour(), time.minute(), time.second());
   return String(dateTime);
 }
-
-//bool posInfo = true;
+ */
 
 void webGps(void* parameter) {
 
-  Serial.print(F("webGps = "));
-  Serial.println(gpsSerial.available());
   connect2WIFI();
-
+  static uint32_t sse_id = 0;
   server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
     request->send(SD, "/index.html", "text/html");
   });
-  server.serveStatic("/", SD, "/");
+  //server.serveStatic("/", SD, "/");
+  server.serveStatic("/", SD, "/")
+    .setCacheControl("max-age=28800")  //8h
+    .setLastModified("Mon, 01 Jan 2024 00:00:00 GMT");
   // Request for the latest data
   server.on("/readings", HTTP_GET, [](AsyncWebServerRequest* request) {
     String json = getCanReadings();
     request->send(200, "application/json", json);
-    json = String();
+    //json = String();
   });
-
   events.onConnect([](AsyncEventSourceClient* client) {
     if (client->lastId()) {
       Serial.printf("Last ID: %u\n", client->lastId());
     }
-    // send event with message "hello!", id current millis
-    // and set reconnect delay to 1 second
-    client->send("hello!", NULL, msec, 10000);
+
+    client->send("hello!", NULL, sse_id, 10000);
   });
+
+
   server.addHandler(&events);
-
-  // Start server
   server.begin();
-
-
   while (true) {
-    events.send(getCanReadings().c_str(), "new_readings", msec);
+    if (!sse_id) Serial.println(" - Web loop start -");
+    sse_id++;
+    String payload = getCanReadings();
+    events.send(payload.c_str(), "new_readings", sse_id);
+    //events.send(getCanReadings().c_str(), "new_readings", msec);
     while (gpsSerial.available() > 0) {  //&& getGPS
       gps.encode(gpsSerial.read());
     }
     if (gps.location.isUpdated()) {
+      char tmp[20];
+      formatDateTimeBuf(tmp, sizeof tmp, gps.date, gps.time);
+      portENTER_CRITICAL(&canReadMux);
+      // safe copy into shared global buffer
+      strncpy(dateTime, tmp, sizeof(dateTime));
+      dateTime[sizeof(dateTime) - 1] = '\0';
       latitude = gps.location.lat();
       longitude = gps.location.lng();
       altitude = gps.altitude.meters();
-      dateTime = formatDateTime(gps.date, gps.time);
+      //dateTime = formatDateTime(gps.date, gps.time);
       numSat = gps.satellites.value();
+      portEXIT_CRITICAL(&canReadMux);
     }
 
-    vTaskDelay(450 / portTICK_RATE_MS);
+    vTaskDelay(500 / portTICK_RATE_MS);
     connect2WIFI();
+    if (wiFiConnection == 1) checkSDVersion();
+  }
+}
+
+
+bool downloadFile(const char* serverPath, const char* localPath) {
+  Serial.print("Downloading: ");
+  Serial.println(serverPath);
+
+  // Initialize HTTP client
+  HTTPClient http;
+  http.begin(serverPath);
+  int httpCode = http.GET();
+
+  if (httpCode == HTTP_CODE_OK) {  // Check for successful download
+    Serial.println("Download started...");
+
+    // Open file on SD card for writing (overwrites if it exists)
+    File file = SD.open(localPath, FILE_WRITE);
+    if (!file) {
+      Serial.println("Failed to open file for writing on SD card.");
+      http.end();
+      return false;
+    }
+
+    // Get the file size
+    int len = http.getSize();
+    // Get the stream of data
+    WiFiClient* stream = http.getStreamPtr();
+
+    // Read data from the stream and write to the file
+    int totalBytesWritten = 0;
+    byte buff[1024] = { 0 };
+    while (http.connected() && (len > 0 || len == -1)) {
+      size_t size = stream->available();
+      if (size) {
+        int bytesRead = stream->readBytes(buff, ((size > sizeof(buff)) ? sizeof(buff) : size));
+        file.write(buff, bytesRead);
+        totalBytesWritten += bytesRead;
+        if (len > 0) {
+          len -= bytesRead;
+        }
+      }
+    }
+    Serial.printf("Downloaded and written %d bytes.\n", totalBytesWritten);
+    file.close();
+    http.end();
+    return true;
+  } else {
+    Serial.printf("HTTP GET failed, error: %s\n", http.errorToString(httpCode).c_str());
+    http.end();
+    return false;
+  }
+}
+
+void checkSDVersion() {
+  wiFiConnection = 2;
+  Serial.println("Checking for New version.");
+
+  const char* baseUrl = "https://github.com/DejanVasic/Gen3-Trip-Logger/tree/master/firmware/SDcard";
+  const char* filesToDownload[] = {
+    "/script.js",
+    "/index.html",
+    "/style.css",
+    "/version.txt"
+  };
+  String version = "";
+  if (SD.exists(String(filesToDownload[3]))) {
+    File file = SD.open(String(filesToDownload[3]), FILE_READ);
+    version = file.readStringUntil('\n');
+    version.trim();  // Remove any whitespace
+    file.close();
+    Serial.printf("Local version: %s\n", version.c_str());
+  }
+
+  HTTPClient http;
+  http.begin(String(baseUrl) + String(filesToDownload[3]));
+  int httpCode = http.GET();
+
+  if (httpCode == HTTP_CODE_OK) {
+    String serverVersion = http.getString();
+    serverVersion.trim();
+    http.end();
+
+    Serial.printf("Server version: %s\n", serverVersion.c_str());
+
+    // Compare local and server versions
+    if (version != serverVersion) {
+      Serial.println("New version found! Starting download process.");
+
+      bool allFilesDownloaded = true;
+      // Iterate through the list of other files and download each one.
+      for (int i = 0; i < 4; i++) {
+        String fullUrl = String(baseUrl) + String(filesToDownload[i]);
+        String sdPath = String(filesToDownload[i]);
+
+        if (!downloadFile(fullUrl.c_str(), sdPath.c_str())) {
+          Serial.printf("Failed to download file: %s\n", filesToDownload[i]);
+          allFilesDownloaded = false;
+          break;  // Exit the loop on the first download failure
+        } else {
+          Serial.printf("Successfully downloaded: %s\n", filesToDownload[i]);
+        }
+      }
+
+    } else {
+      Serial.println("No update needed. Device is up to date.");
+    }
+  } else {
+    Serial.printf("Failed to check for server version, error: %s\n", http.errorToString(httpCode).c_str());
+    http.end();
   }
 }

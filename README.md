@@ -18,7 +18,7 @@ For logging it uses Google sheet while the dashboard display is reachable as loc
 - **Web Dashboard** (hosted on ESP32):
   - RPM, Tank level, estimated dte, steering angle, engine and cabin temperature
   - Trip duration, distance, average fuel consumption
-  - Real current and average speed (with reset for toll to toll average speeding measurement)
+  - Real current, memorized by cruise control and average trip speed (with reset for toll to toll average speeding measurement)
 - **Google Sheets Sync**:
   - Uploads trip data to Google Sheets or temporarily saves them to SD card if there is no internet link detected
   - Generates trip maps using Google Apps Script
@@ -31,6 +31,8 @@ For logging it uses Google sheet while the dashboard display is reachable as loc
   - Auto-unlocks when parked or when collision is detected
 - **Other**:
   - Audible alert if the car is started with wheels not in a almost straight position
+  - Audible Alert on car turn-off if any rear window is open.
+  - Blinks the hazard lights once when the first door is opened after the car is turned off, providing an immediate warning to other drivers
   - Dims aftermarket HeadUnit when Prius dashboard is dimmed too
 
 ---
@@ -43,6 +45,7 @@ For logging it uses Google sheet while the dashboard display is reachable as loc
 - SD card module
 - DC/DC converter (Mini560)
 - Optocoupler (ASSR-1228)
+- passive piezo buzzer from some PC motherboard
 ---
 
 
@@ -51,7 +54,7 @@ For logging it uses Google sheet while the dashboard display is reachable as loc
 - **Arduino Firmware** for ESP32
 - **Web Interface** (HTML/CSS/JS served by ESP32)
 - **Google Apps Script** for Sheets integration and map generation
-- **Android App** for head unit display
+- **Android App** for head unit display. Any web browser with javascript support can be used
 
 ---
 

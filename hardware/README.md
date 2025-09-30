@@ -40,10 +40,11 @@ When connected to the internet, those data are uploaded to Google spreadsheet an
 - Timestamp
 - RPM
 - Tank level
-- Current trip Time, Distance and Consumptionm
+- Current trip time, distance, average speed and consumptionm
+- Memorized cruise control speed
 - Car cabin air temperature
-- Engine temperature
-- Steering Angle
+- Engine and inverter temperature
+- Steering angle
 - Real speed
 
 ## 📷 Schematic Diagram
