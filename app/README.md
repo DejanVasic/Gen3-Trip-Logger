@@ -8,6 +8,11 @@ This Android application is a fullscreen web browser (without an address bar) de
 - **ESP32 IP Discovery**: Automatically discovers the phone's IP address and modifies the last octet to connect to the ESP32 device.
 - **Persistent Configuration**: Remembers the last octet entered by the user on the first run.
 - **Reconnect Logic**: Attempts to reconnect if the ESP32 web server is unreachable.
+- **Gesture Navigation**:
+  - **Swipe up** (one finger) opens the local audio player.
+  - **Pull down** (one finger) on a sub-page like `/debug` reloads that page; on the dashboard or on the error screen it runs a full IP rediscovery in case the ESP32 has moved.
+  - **Two-finger scroll** is used to scroll content that overflows the screen, since single-finger up/down gestures are already mapped to the actions above.
+  - **Back button** navigates within the WebView history (e.g. returns to the dashboard from `/debug`) and only exits the app once there is no further history.
 - **Now Playing Info**: Displays the currently playing song's artist and title from the local audio player.
 - **Notification Access**: Requires user permission to read notifications for displaying song information.
 

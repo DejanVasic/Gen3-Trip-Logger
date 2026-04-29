@@ -15,23 +15,27 @@ For logging it uses Google sheet while the dashboard display is reachable as loc
   - Trip duration and distance (total and EV-only)
   - Fuel consumption
   - Tank level
-- **Web Dashboard** (hosted on ESP32):
-  - RPM, Tank level, estimated dte, steering angle, engine and cabin temperature
-  - Trip duration, distance, average fuel consumption
-  - Real current, memorized by cruise control and average trip speed (with reset for toll to toll average speeding measurement)
+- **Web Dashboard** (hosted on ESP32, served from SD card with gzip compression):
+  - RPM (with calculated engine load shown inside the radial gauge), tank level, estimated DTE, steering angle, engine and inverter temperature
+  - Average fuel consumption, trip distance and trip duration
+  - Real speed, cruise-control memorized speed, and average trip speed (with reset for toll-to-toll average speeding measurement)
+  - Traction battery: live current (charge/discharge), per-block voltages of all 14 NiMH blocks visualized as a stacked bar, and auxiliary 12V battery voltage
+  - Cabin temperature
+  - Diagnostic page at `/debug` (free heap, last reset reason, uptime, Wi-Fi RSSI, SSE client count, presence/size of the offline-buffered `GPSdata.tsv`, last upload timing, fuel-cut status, door/window status, per-block internal resistance)
 - **Google Sheets Sync**:
   - Uploads trip data to Google Sheets or temporarily saves them to SD card if there is no internet link detected
   - Generates trip maps using Google Apps Script
   - On tank refill logs previous drive data
 - **Android Head Unit App**:
   - Displays the ESP32 web page dashboard in fullscreen constructing its IP address by replacing the last octet with a known static value
+  - Tap the logo to open `/debug`; the device's back button navigates within the WebView (returns to the dashboard from `/debug`); pull-to-refresh reloads the current page (or rediscovers the IP when on root or on the error screen)
   - Shows currently playing song title from local audio player
 - **Smart Locking**:
   - Auto-locks doors when driving starts
-  - Auto-unlocks when parked or when collision is detected
+  - Auto-unlocks when parked or when collision is detected (rapid deceleration also turns on hazard lights)
 - **Other**:
   - Audible alert if the car is started with wheels not in a almost straight position
-  - Audible Alert on car turn-off if any rear window is open.
+  - Audible alert on car turn-off if any window is left open (longer alert for rear windows, shorter for front)
   - Blinks the hazard lights once when the first door is opened after the car is turned off, providing an immediate warning to other drivers
   - Dims aftermarket HeadUnit when Prius dashboard is dimmed too
 
@@ -70,6 +74,3 @@ When you create [Google service account](https://github.com/DejanVasic/Gen3-Trip
 - **Hostname** is trial to use it with mdns Arduino library to access ESP32 Webpage (dashboard) using its hostname and bonjour browser but since it isn't reliable you can use this [android app](https://github.com/DejanVasic/Gen3-Trip-Logger/tree/master/app/release)
 
 **![Ssreenshot](https://github.com/DejanVasic/Gen3-Trip-Logger/blob/master/Screenshot.jpg)**
-
-
-

@@ -24,6 +24,7 @@
 //#include <ESPmDNS.h>
 //#include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>  //1280*720
+//#include <AsyncWebResponse.h>
 //#include "mdns.h"  //it doesn't work as expected so I'll use my app for browsing using IP address
 #include "soc/rtc_cntl_reg.h"
 #include "soc/rtc.h"
@@ -56,17 +57,11 @@ volatile float altitude = 0.0;
 //bool mDNSInitialized = false;
 bool uploading = false;
 bool noSettings = true;
-uint8_t wiFiConnection = 0;  //0 never connected, 1 first time connected, 2 reconnected
-// Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
-// Create an Event Source on /events
 AsyncEventSource events("/events");
-// Json Variable to Hold Sensor Readings
 FirebaseJsonData readings;
-// Token Callback function
 void tokenStatusCallback(TokenInfo info);
 void lockDoors();  // Function declaration
-void checkSDVersion();
 
 // Function that gets current epoch time in 3 attempts
 unsigned long getTime() {
@@ -83,49 +78,43 @@ unsigned long getTime() {
   return now;
 }
 
-String getCanReadings() {
-  FirebaseJson json;  // local, re-entrant
+int getCanReadings(char* out, size_t outSize) {
+  if (!out || outSize == 0) return -1;
 
-  // Snapshot shared globals in a short critical section
   portENTER_CRITICAL(&canReadMux);
-  unsigned long msec_local = msec;
-  uint16_t rpm_local = rpm;
-  float tank_local = tankLitters;
-  int8_t temp_local = tempC;
-  int8_t invTemp_local = invTemp;
-  float dist_local = tripDistance;
-  float cons_local = tripConsumption;
-  int16_t sAng_local = steeringAngle;
-  uint8_t numSat_local = numSat;
-  uint8_t speed_local = speed;
-  uint8_t ccSpeed_local = ccSpeed;
-  uint16_t tc_local = tripCounter;
-  uint8_t fss_local = fss;
-  int8_t tempRoomC_local = tempRoomC;
+  unsigned long m_msec = msec;
+  uint16_t m_rpm = rpm;
+  float m_tank = tankLitters;
+  int8_t m_temp = tempC;
+  int8_t m_invTemp = invTemp;
+  float m_dist = tripDistance;
+  float m_cons = tripConsumption;
+  int16_t m_sAng = steeringAngle;
+  uint8_t m_numSat = numSat;
+  uint8_t m_speed = speed;
+  uint8_t m_ccSpeed = ccSpeed;
+  int8_t m_tempRoom = tempRoomC;
+  char m_voltages[128];
+  strncpy(m_voltages, voltagesStr, sizeof(m_voltages));
+  m_voltages[sizeof(m_voltages) - 1] = '\0';
+  float m_current = battCurrent;
+  uint8_t m_cl = calculatedLoad;
+  uint16_t m_tripCounter = tripCounter;
   portEXIT_CRITICAL(&canReadMux);
 
-  // Build JSON from the local snapshot
-  json.set("rpm", rpm_local);
-  json.set("tank", tank_local);
-  json.set("temp", temp_local);
-  json.set("invTemp", invTemp_local);
-  json.set("dist", dist_local);
-  json.set("cons", cons_local);
-  json.set("msec", msec_local);
-  json.set("sAng", sAng_local);
-  json.set("numSat", numSat_local);
-  json.set("speed", speed_local);
-  json.set("ccSpeed", ccSpeed_local);
-  json.set("tripCounter", (tc_local + fss_local / 10.0));
-  json.set("tempRoomC", tempRoomC_local);
+  int n = snprintf(out, outSize,
+                   "{\"rpm\":%u,\"tank\":%.1f,\"temp\":%d,\"invTemp\":%d,"
+                   "\"dist\":%.2f,\"cons\":%.2f,\"msec\":%lu,\"sAng\":%d,"
+                   "\"numSat\":%u,\"speed\":%u,\"ccSpeed\":%u,\"tripCounter\":%u,"
+                   "\"tempRoomC\":%d,\"battV\":\"%s\",\"current\":%.1f,\"cl\":%u}",
+                   m_rpm, m_tank, m_temp, m_invTemp,
+                   m_dist, m_cons, m_msec, m_sAng,
+                   m_numSat, m_speed, m_ccSpeed, m_tripCounter,
+                   m_tempRoom, m_voltages, m_current, m_cl);
 
-  String jsonString;
-  if (json.toString(jsonString)) {
-    return jsonString;
-  }
-  // Fallback
-  Serial.println("getCanReadings: json.toString() failed");
-  return "{}";
+  if (n < 0) return -1;
+  if ((size_t)n >= outSize) return (int)(outSize - 1);  // truncated
+  return n;
 }
 
 void readSettings() {
@@ -136,7 +125,9 @@ void readSettings() {
       return;
     }
 
+    size_t fileSize = Settings.size();
     String jsonString;
+    jsonString.reserve(fileSize + 1);
     while (Settings.available()) {
       jsonString += (char)Settings.read();
     }
@@ -174,8 +165,6 @@ void write2SD() {
   unsigned long msec_local = msec;
   uint32_t odom_local = odometer;
   float tank_local = tankLitters;
-  //dateTime.toCharArray(dtbuf, sizeof(dtbuf));
-  //char dtbuf[20] = dateTime;
   strncpy(dtbuf, dateTime, sizeof(dtbuf));
   dtbuf[sizeof(dtbuf) - 1] = '\0';
   double latitude_local = latitude;
@@ -188,10 +177,8 @@ void write2SD() {
   unsigned long msecEV_local = msecEV;
   portEXIT_CRITICAL(&canReadMux);
 
-  // Open the file in append mode
   File file = SD.open("/GPSdata.tsv", FILE_APPEND);
   if (file) {
-    // Write the data to the file
     file.print(getTime());
     file.print("\t");
     file.print(msec_local);
@@ -227,16 +214,16 @@ void write2SD() {
     tone(buzzer, 2000, 100);
     vTaskDelay(150 / portTICK_RATE_MS);
     tone(buzzer, 2000, 100);
-    vTaskDelay(100 / portTICK_RATE_MS);
+    //vTaskDelay(100 / portTICK_RATE_MS);
   }
 }
 
 
 void connect2WIFI() {
-
+  static bool wiFiConnectied = false;
   if (WiFi.status() == WL_CONNECTED || WIFI_SSID == "") {  //&& mDNSInitialized) {
-    if (wiFiConnection == 0) {
-      wiFiConnection = 1;
+    if (!wiFiConnectied) {
+      wiFiConnectied = true;
       Serial.print(F("RRSI: "));
       Serial.println(WiFi.RSSI());
       Serial.print(F(" CONNECTED: "));
@@ -245,22 +232,36 @@ void connect2WIFI() {
     }
     return;
   } else {
-    //mDNSInitialized = false;
-    if (WiFi.status() != WL_CONNECTED) {
-
-      WiFi.disconnect(true);  // Clear any stale connection
-      vTaskDelay(100 / portTICK_RATE_MS);
-      WiFi.setHostname(HOSTNAME);
-      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-      if (WiFi.waitForConnectResult(3000) != WL_CONNECTED) {
-        Serial.print(F("WIFI connecting to "));
-        Serial.println(WIFI_SSID);
-      }
-      /*       if (WiFi.status() == WL_CONNECTED) {
-
-      } */
+    WiFi.disconnect(true);  // Clear any stale connection
+    wiFiConnectied = false;
+    vTaskDelay(100 / portTICK_RATE_MS);
+    WiFi.setHostname(HOSTNAME);
+    WiFi.setSleep(false);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    if (WiFi.waitForConnectResult(3000) != WL_CONNECTED) {
+      Serial.print(F("WIFI connecting to "));
+      Serial.println(WIFI_SSID);
     }
   }
+}
+
+bool waitForDoorOrTimeout() {
+  int sleepCheckCounter = 0;
+
+  // Loop for a maximum of 30 seconds (300 iterations)
+  while (sleepCheckCounter < 300) {
+
+    if (digitalRead(IGNin) == HIGH) return false;  //car started again
+
+    if (flashedOnce == true) return true;  // door opened, Go to sleep immediately
+    vTaskDelay(100 / portTICK_RATE_MS);
+    sleepCheckCounter++;
+    /*     if (sleepCheckCounter % 50 == 0) {
+      Serial.printf("Sleep check progress: %d of %d\n", sleepCheckCounter, 300);
+    } */
+  }
+  Serial.println(F("30-second timeout reached. Proceeding to sleep."));
+  return true;  // RETURN TRUE: Go to sleep
 }
 
 void go2Sleep() {
@@ -289,6 +290,7 @@ void go2DeepSleep() {
 }
 
 void upLoad2Google(void* parameter) {
+
   //if (msec > uploadms + 10000) { upLoad2Google(NULL); }  // less than 10 secondes passed after last upload //upLoadTask();
 
   if (uploading) return;
@@ -302,7 +304,7 @@ void upLoad2Google(void* parameter) {
       tone(buzzer, 2000, 100);
       vTaskDelay(150 / portTICK_RATE_MS);
       tone(buzzer, 2000, 100);
-      go2Sleep();
+      if (waitForDoorOrTimeout()) go2Sleep();
     }
     GoogleTask = NULL;
     vTaskDelete(NULL);
@@ -358,25 +360,43 @@ void upLoad2Google(void* parameter) {
   if (SD.exists("/GPSdata.tsv")) {
     File dataFile = SD.open("/GPSdata.tsv");
     while (GSheet.ready()) {
-      String gData;
-      uint8_t rowCount = 0;                            // Reset row count for each batch
-      uint8_t row = liveData;                          // Reset row for each batch
-      while (rowCount < 50 && dataFile.available()) {  // Read 50 lines
-        String line = dataFile.readStringUntil('\r');  // Read until newline
-        line.replace("\n", "");                        // Remove carriage return
-        if (line.length() < 13) { break; }             // Only process non-empty lines
+      uint8_t rowCount = 0;    // Reset row count for each batch
+      uint8_t row = liveData;  // Reset row for each batch
+
+      char line[256];     // TSV linija - sadrzi do 13 polja
+      char fieldBuf[32];  // Pojedinacno polje iz linije
+      char keyBuf[32];    // JSON put-key "values/[col]/[row]"
+
+      while (rowCount < 50 && dataFile.available()) {
+        size_t lineLen = dataFile.readBytesUntil('\r', line, sizeof(line) - 1);
+        line[lineLen] = '\0';
+        if (dataFile.peek() == '\n') dataFile.read();
+
+        if (lineLen < 13) { break; }  // Only process non-empty lines
+
         uint8_t col = 0;
-        uint8_t startIndex = 0;
-        uint8_t tabIndex = line.indexOf('\t');
-        while (tabIndex >= 0 && col < 13) {  // Ensure we don't exceed the number of columns
-          gData = line.substring(startIndex, tabIndex);
-          if (col != 4) {  //change decimal separator from . to , in  !date columns
-            gData.replace(".", ",");
+        size_t startIdx = 0;
+
+        for (size_t i = 0; i <= lineLen && col < 13; i++) {
+          if (line[i] == '\t' || line[i] == '\0') {
+            size_t fieldLen = i - startIdx;
+            if (fieldLen >= sizeof(fieldBuf)) fieldLen = sizeof(fieldBuf) - 1;
+            memcpy(fieldBuf, line + startIdx, fieldLen);
+            fieldBuf[fieldLen] = '\0';
+
+            // change decimal separator for non US-style Google sheet
+            if (col != 4) {
+              for (size_t j = 0; j < fieldLen; j++) {
+                if (fieldBuf[j] == '.') fieldBuf[j] = ',';
+              }
+            }
+
+            snprintf(keyBuf, sizeof(keyBuf), "values/[%u]/[%u]", col, row);
+            valueRange.set(keyBuf, fieldBuf);
+
+            startIdx = i + 1;
+            col++;
           }
-          valueRange.set("values/[" + String(col) + "]/[" + String(row) + "]", gData);
-          startIndex = tabIndex + 1;  // Move past the tab character
-          tabIndex = line.indexOf('\t', startIndex);
-          col++;
         }
         row++;
         rowCount++;
@@ -433,7 +453,7 @@ void upLoad2Google(void* parameter) {
   }
   uploading = false;
   if (digitalRead(IGNin) == LOW) {
-    go2Sleep();
+    if (waitForDoorOrTimeout()) go2Sleep();
   }
   GoogleTask = NULL;
   vTaskDelete(NULL);
@@ -451,185 +471,269 @@ void tokenStatusCallback(TokenInfo info) {
 
 void formatDateTimeBuf(char* out, size_t outSize, TinyGPSDate date, TinyGPSTime time) {
   if (!out || outSize == 0) return;
-  // snprintf ensures no overflow and NUL-termination
   snprintf(out, outSize, "%02d.%02d.%04d %02d:%02d:%02d",
            date.day(), date.month(), date.year(),
            time.hour(), time.minute(), time.second());
 }
-
-/* String formatDateTime(TinyGPSDate date, TinyGPSTime time) {
-  char dateTime[20];
-  sprintf(dateTime, "%02d.%02d.%04d %02d:%02d:%02d",
-          date.day(), date.month(), date.year(),
-          time.hour(), time.minute(), time.second());
-  return String(dateTime);
+String getContentType(String filename) {
+  if (filename.endsWith(".html")) return "text/html";
+  if (filename.endsWith(".css")) return "text/css";
+  if (filename.endsWith(".js")) return "application/javascript";
+  if (filename.endsWith(".svg")) return "image/svg+xml";
+  if (filename.endsWith(".woff2")) return "font/woff2";
+  return "text/plain";  // Default
 }
- */
+
+// Handler for serving static files with GZIP support
+void handleStaticFile(AsyncWebServerRequest* request) {
+  String path = request->url();
+  if (path.equals("/")) {
+    path = "/index.html";
+  }
+
+  String contentType = getContentType(path);
+
+  // --- GZIP Logic ---
+  bool canGzip = request->hasHeader("Accept-Encoding") && request->header("Accept-Encoding").indexOf("gzip") != -1;
+  String pathWithGz = path + ".gz";
+  if (canGzip && SD.exists(pathWithGz)) {
+    AsyncWebServerResponse* response = request->beginResponse(SD, pathWithGz, contentType);
+    response->addHeader("Content-Encoding", "gzip");
+    //response->setCacheControl("max-age=28800").setLastModified("Mon, 01 Jan 2024 00:00:00 GMT");
+    request->send(response);
+    return;
+  }
+  // --- End GZIP Logic ---
+
+  if (SD.exists(path)) {
+    AsyncWebServerResponse* response = request->beginResponse(SD, path, contentType);
+
+    request->send(response);
+    return;
+  }
+
+  request->send(404, "text/plain", "404: Not Found");
+}
 
 void webGps(void* parameter) {
-
   connect2WIFI();
   static uint32_t sse_id = 0;
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
-    request->send(SD, "/index.html", "text/html");
-  });
-  //server.serveStatic("/", SD, "/");
-  server.serveStatic("/", SD, "/")
-    .setCacheControl("max-age=28800")  //8h
-    .setLastModified("Mon, 01 Jan 2024 00:00:00 GMT");
-  // Request for the latest data
+  unsigned long lastSendTime = 0;
+  const unsigned long sendInterval = 400;  //  400ms
+
+  server.onNotFound(handleStaticFile);
+
   server.on("/readings", HTTP_GET, [](AsyncWebServerRequest* request) {
-    String json = getCanReadings();
-    request->send(200, "application/json", json);
-    //json = String();
+    static char jsonBuf[512];
+    int n = getCanReadings(jsonBuf, sizeof(jsonBuf));
+    if (n > 0) {
+      request->send(200, "application/json", jsonBuf);
+    } else {
+      request->send(500, "text/plain", "readings error");
+    }
   });
+
   events.onConnect([](AsyncEventSourceClient* client) {
     if (client->lastId()) {
       Serial.printf("Last ID: %u\n", client->lastId());
     }
-
     client->send("hello!", NULL, sse_id, 10000);
   });
 
-
   server.addHandler(&events);
+  server.on("/debug", HTTP_GET, [](AsyncWebServerRequest* request) {
+    static char buf[2048];
+    size_t len = 0;
+
+    // HTML preamble
+    len += snprintf(buf + len, sizeof(buf) - len,
+                    "<!DOCTYPE html><html><head>"
+                    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+                    "<style>"
+                    "body{background:#141414;color:#91E8CE;margin:8px;font-family:monospace}"
+                    "pre{white-space:pre-wrap;font-size:14px;margin:0}"
+                    "</style></head><body><pre>");
+    // --- HEAP ---
+    len += snprintf(buf + len, sizeof(buf) - len,
+                    "=== HEAP ===\n"
+                    "Free:      %u B\n"
+                    "Min ever:  %u B\n\n",
+                    ESP.getFreeHeap(), ESP.getMinFreeHeap());
+
+    // --- RESET REASON ---
+    const char* resetStr = "unknown";
+    switch (esp_reset_reason()) {
+      case ESP_RST_POWERON: resetStr = "power-on"; break;
+      case ESP_RST_EXT: resetStr = "external pin"; break;
+      case ESP_RST_SW: resetStr = "software reset"; break;
+      case ESP_RST_PANIC: resetStr = "panic (exception)"; break;
+      case ESP_RST_INT_WDT: resetStr = "interrupt watchdog"; break;
+      case ESP_RST_TASK_WDT: resetStr = "task watchdog"; break;
+      case ESP_RST_WDT: resetStr = "other watchdog"; break;
+      case ESP_RST_DEEPSLEEP: resetStr = "wake from deep sleep"; break;
+      case ESP_RST_BROWNOUT: resetStr = "brownout (DC power)"; break;
+      case ESP_RST_SDIO: resetStr = "SDIO"; break;
+      default: break;
+    }
+    len += snprintf(buf + len, sizeof(buf) - len,
+                    "=== RESET REASON ===\n%s\n\n", resetStr);
+
+    // --- UPTIME ---
+    unsigned long uptimeSec = millis() / 1000UL;
+    unsigned long uHours = uptimeSec / 3600UL;
+    unsigned long uMinutes = (uptimeSec % 3600UL) / 60UL;
+    unsigned long uSeconds = uptimeSec % 60UL;
+    len += snprintf(buf + len, sizeof(buf) - len,
+                    "=== UPTIME ===\n%luh %lum %lus\n\n",
+                    uHours, uMinutes, uSeconds);
+
+    // --- CAR STATUS (hex) ---
+    len += snprintf(buf + len, sizeof(buf) - len,
+                    "=== CAR STATUS ===\n"
+                    "FSS (fuel cut): %u\n"
+                    "Door status:    0x%02X  (0x1F = all unlocked)\n"
+                    "Windows status: 0x%02X  (RL RR FR FL, 2 bit per window)\n\n",
+                    fss, door_status, windows_status);
+
+    // --- WIFI ---
+    len += snprintf(buf + len, sizeof(buf) - len,
+                    "=== WIFI ===\n"
+                    "SSID:   %s\n"
+                    "RSSI:   %d dBm\n"
+                    "IP:     %s\n\n",
+                    WiFi.SSID().c_str(), WiFi.RSSI(), WiFi.localIP().toString().c_str());
+
+    // --- SSE CLIENTS ---
+    len += snprintf(buf + len, sizeof(buf) - len,
+                    "=== SSE CLIENTS ===\n%u\n\n", events.count());
+
+    // --- GPSdata.tsv ---
+    len += snprintf(buf + len, sizeof(buf) - len, "=== GPSdata.tsv ===\n");
+    if (SD.exists("/GPSdata.tsv")) {
+      File f = SD.open("/GPSdata.tsv", FILE_READ);
+      if (f) {
+        len += snprintf(buf + len, sizeof(buf) - len,
+                        "Exists: yes\nSize:   %u B\n\n", f.size());
+        f.close();
+      } else {
+        len += snprintf(buf + len, sizeof(buf) - len,
+                        "Exists: yes (cannot open file)\n\n");
+      }
+    } else {
+      len += snprintf(buf + len, sizeof(buf) - len, "Exists: no\n\n");
+    }
+
+    // --- UPLOAD TIMING ---
+    len += snprintf(buf + len, sizeof(buf) - len, "=== UPLOAD ===\n");
+    long initialUploadms = 10000 + (long)uploadInterval * -1;
+    if (uploadms == initialUploadms) {
+      len += snprintf(buf + len, sizeof(buf) - len,
+                      "Last try: never\n");
+    } else {
+      unsigned long elapsed = (millis() - (unsigned long)uploadms) / 1000UL;
+      len += snprintf(buf + len, sizeof(buf) - len,
+                      "Last try: before %lu s\n", elapsed);
+    }
+    long remaining = (long)uploadInterval - ((long)millis() - uploadms);
+    if (remaining < 0) remaining = 0;
+    len += snprintf(buf + len, sizeof(buf) - len,
+                    "Next for:        %ld s (or at +%u km on odometer)\n"
+                    "Uploading now:     %s\n\n",
+                    remaining / 1000L, upOdomInterval, uploading ? "yes" : "no");
+
+    // --- BLOCK INTERNAL RESISTANCE ---
+    len += snprintf(buf + len, sizeof(buf) - len,
+                    "=== BLOCK INTERNAL RES (mOhm) ===\n");
+    for (uint8_t i = 0; i < 14; i++) {
+      len += snprintf(buf + len, sizeof(buf) - len,
+                      "%2u: %3u   ", i + 1, blockInternalRes[i]);
+      if ((i + 1) % 4 == 0) {
+        len += snprintf(buf + len, sizeof(buf) - len, "\n");
+      }
+    }
+    if (14 % 4 != 0) {
+      len += snprintf(buf + len, sizeof(buf) - len, "\n");
+    }
+
+    len += snprintf(buf + len, sizeof(buf) - len, "</pre></body></html>");
+
+    request->send(200, "text/html", buf);
+  });
+
   server.begin();
+  if (!sse_id) Serial.println(F(" - Web loop start -"));
+
   while (true) {
-    if (!sse_id) Serial.println(" - Web loop start -");
-    sse_id++;
-    String payload = getCanReadings();
-    events.send(payload.c_str(), "new_readings", sse_id);
-    //events.send(getCanReadings().c_str(), "new_readings", msec);
-    while (gpsSerial.available() > 0) {  //&& getGPS
+
+    while (gpsSerial.available() > 0) {
       gps.encode(gpsSerial.read());
     }
+
     if (gps.location.isUpdated()) {
       char tmp[20];
       formatDateTimeBuf(tmp, sizeof tmp, gps.date, gps.time);
       portENTER_CRITICAL(&canReadMux);
-      // safe copy into shared global buffer
       strncpy(dateTime, tmp, sizeof(dateTime));
       dateTime[sizeof(dateTime) - 1] = '\0';
       latitude = gps.location.lat();
       longitude = gps.location.lng();
       altitude = gps.altitude.meters();
-      //dateTime = formatDateTime(gps.date, gps.time);
       numSat = gps.satellites.value();
       portEXIT_CRITICAL(&canReadMux);
     }
 
-    vTaskDelay(500 / portTICK_RATE_MS);
+    bool processVoltages = false;
+    uint8_t localVoltages[MAX_ISO_TP_MSG_LEN];
+
+    portENTER_CRITICAL(&canReadMux);
+    if (voltageDataReady) {
+      memcpy(localVoltages, completedVoltagesBuffer, sizeof(localVoltages));
+      voltageDataReady = false;
+      processVoltages = true;
+    }
+    portEXIT_CRITICAL(&canReadMux);
+
+    if (processVoltages) {
+      char tempVoltagesStr[128];  // 64
+      size_t len = 0;
+      tempVoltagesStr[0] = '\0';
+
+      for (uint8_t i = 0; i < 14; i++) {
+        uint16_t rawV = ((uint16_t)localVoltages[2 + (2 * i)] << 8) | localVoltages[3 + (2 * i)];
+        float measuredV = (rawV * 79.99f / 65535.0f);
+        float blockIR = (float)blockInternalRes[i] / 1000.0f;
+        float staticV = measuredV + (battCurrent * blockIR);
+        uint16_t staticVX10 = (uint16_t)(staticV * 10.0f + 0.5f);
+        len += snprintf(tempVoltagesStr + len, sizeof(tempVoltagesStr) - len, "%u,", staticVX10);
+      }
+
+      uint16_t rawV_aux = ((uint16_t)localVoltages[30] << 8) | localVoltages[31];
+      float measuredV_aux = (((float)rawV_aux * 79.9f) / 65535.0f) - 40.0f;
+      uint16_t auxVX10 = (uint16_t)(measuredV_aux * 10.0f + 0.5f);
+      snprintf(tempVoltagesStr + len, sizeof(tempVoltagesStr) - len, "%u", auxVX10);
+
+      portENTER_CRITICAL(&canReadMux);
+      strncpy(voltagesStr, tempVoltagesStr, sizeof(voltagesStr) - 1);
+      voltagesStr[sizeof(voltagesStr) - 1] = '\0';
+      portEXIT_CRITICAL(&canReadMux);
+    }
+
+    unsigned long currentMillis = millis();
+    if (currentMillis - lastSendTime >= sendInterval) {
+      if (events.count() > 0) {
+        sse_id++;
+        static char payload[512];
+        int n = getCanReadings(payload, sizeof(payload));
+        if (n > 0) {
+          events.send(payload, "new_readings", sse_id);
+        }
+      }
+      lastSendTime = currentMillis;
+    }
+
+    vTaskDelay(50 / portTICK_PERIOD_MS);
+
     connect2WIFI();
-    if (wiFiConnection == 1) checkSDVersion();
-  }
-}
-
-
-bool downloadFile(const char* serverPath, const char* localPath) {
-  Serial.print("Downloading: ");
-  Serial.println(serverPath);
-
-  // Initialize HTTP client
-  HTTPClient http;
-  http.begin(serverPath);
-  int httpCode = http.GET();
-
-  if (httpCode == HTTP_CODE_OK) {  // Check for successful download
-    Serial.println("Download started...");
-
-    // Open file on SD card for writing (overwrites if it exists)
-    File file = SD.open(localPath, FILE_WRITE);
-    if (!file) {
-      Serial.println("Failed to open file for writing on SD card.");
-      http.end();
-      return false;
-    }
-
-    // Get the file size
-    int len = http.getSize();
-    // Get the stream of data
-    WiFiClient* stream = http.getStreamPtr();
-
-    // Read data from the stream and write to the file
-    int totalBytesWritten = 0;
-    byte buff[1024] = { 0 };
-    while (http.connected() && (len > 0 || len == -1)) {
-      size_t size = stream->available();
-      if (size) {
-        int bytesRead = stream->readBytes(buff, ((size > sizeof(buff)) ? sizeof(buff) : size));
-        file.write(buff, bytesRead);
-        totalBytesWritten += bytesRead;
-        if (len > 0) {
-          len -= bytesRead;
-        }
-      }
-    }
-    Serial.printf("Downloaded and written %d bytes.\n", totalBytesWritten);
-    file.close();
-    http.end();
-    return true;
-  } else {
-    Serial.printf("HTTP GET failed, error: %s\n", http.errorToString(httpCode).c_str());
-    http.end();
-    return false;
-  }
-}
-
-void checkSDVersion() {
-  wiFiConnection = 2;
-  Serial.println("Checking for New version.");
-
-  const char* baseUrl = "https://github.com/DejanVasic/Gen3-Trip-Logger/tree/master/firmware/SDcard";
-  const char* filesToDownload[] = {
-    "/script.js",
-    "/index.html",
-    "/style.css",
-    "/version.txt"
-  };
-  String version = "";
-  if (SD.exists(String(filesToDownload[3]))) {
-    File file = SD.open(String(filesToDownload[3]), FILE_READ);
-    version = file.readStringUntil('\n');
-    version.trim();  // Remove any whitespace
-    file.close();
-    Serial.printf("Local version: %s\n", version.c_str());
-  }
-
-  HTTPClient http;
-  http.begin(String(baseUrl) + String(filesToDownload[3]));
-  int httpCode = http.GET();
-
-  if (httpCode == HTTP_CODE_OK) {
-    String serverVersion = http.getString();
-    serverVersion.trim();
-    http.end();
-
-    Serial.printf("Server version: %s\n", serverVersion.c_str());
-
-    // Compare local and server versions
-    if (version != serverVersion) {
-      Serial.println("New version found! Starting download process.");
-
-      bool allFilesDownloaded = true;
-      // Iterate through the list of other files and download each one.
-      for (int i = 0; i < 4; i++) {
-        String fullUrl = String(baseUrl) + String(filesToDownload[i]);
-        String sdPath = String(filesToDownload[i]);
-
-        if (!downloadFile(fullUrl.c_str(), sdPath.c_str())) {
-          Serial.printf("Failed to download file: %s\n", filesToDownload[i]);
-          allFilesDownloaded = false;
-          break;  // Exit the loop on the first download failure
-        } else {
-          Serial.printf("Successfully downloaded: %s\n", filesToDownload[i]);
-        }
-      }
-
-    } else {
-      Serial.println("No update needed. Device is up to date.");
-    }
-  } else {
-    Serial.printf("Failed to check for server version, error: %s\n", http.errorToString(httpCode).c_str());
-    http.end();
+    if (digitalRead(IGNin) == LOW && msec + 90000 < millis()) go2Sleep();
   }
 }

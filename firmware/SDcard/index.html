@@ -24,9 +24,11 @@
         &nbsp;<span id="timeHM">00:00</span>
       </div>
       <div class="logo">
-        <svg id="prius" width="420" height="70">
-          <use xlink:href="graphics.svg#prius"></use>
-        </svg>
+        <a href="/debug">
+          <svg id="prius" width="420" height="70">
+            <use xlink:href="graphics.svg#prius"></use>
+          </svg>
+        </a>
       </div>
       <div class="odom">
         <svg class="ikona-small">
@@ -43,53 +45,163 @@
       </div>
     </div>
 
-    <div class="card-grid">
-      <div class="card">
-        <p class="card-title"><svg class="ikona">
-            <use xlink:href="graphics.svg#pumpa"></use>
-          </svg><svg class="ikona">
-            <use xlink:href="graphics.svg#put"></use>
-          </svg></p>
-        <canvas id="gauge-avCons"></canvas>
+    <div class="card-grid top-row">
+
+      <!-- ===== COL 1: AV CONS ===== -->
+      <div class="slot slot-title col-1">
+        <svg class="ikona">
+          <use xlink:href="graphics.svg#pumpa"></use>
+        </svg>
+        <svg class="ikona">
+          <use xlink:href="graphics.svg#put"></use>
+        </svg>
       </div>
-      <div class="card">
-        <p class="card-title"><svg class="ikona">
-            <use xlink:href="graphics.svg#rpm"></use>
-          </svg></p>
-        <canvas id="gauge-rpm"></canvas>
+      <div class="slot slot-above col-1"></div>
+      <div class="slot slot-gauge col-1">
+        <div class="gauge-body">
+          <div class="gauge-scale" id="scale-avCons"></div>
+          <div class="gauge-bar-outline">
+            <div class="gauge-bar-fill" id="bar-avCons"></div>
+          </div>
+        </div>
       </div>
-      <div class="card">
-        <p class="card-title"><svg class="ikona">
-            <use xlink:href="graphics.svg#levo"></use>
-          </svg><svg class="ikona">
-            <use xlink:href="graphics.svg#pumpa"></use>
-          </svg></p>&nbsp;&nbsp;
-        <canvas id="gauge-tank"></canvas>
+      <div class="slot slot-value col-1 gauge-value-box">
+        <span id="val-avCons">0.0</span>
+        <span class="unit">L/100km</span>
       </div>
 
-      <div class="card">
-        <p class="card-title"><svg class="ikona">
-            <use xlink:href="graphics.svg#munja"></use>
-          </svg>
-          <svg class="ikona">
-            <use xlink:href="graphics.svg#temp"></use>
-          </svg>
-        </p>
-        <canvas id="gauge-inverertertemp"></canvas>
+      <!-- ===== COL 2: RPM DUAL RADIAL ===== -->
+      <div class="slot slot-title col-4">
+        <svg class="ikona">
+          <use xlink:href="graphics.svg#rpm"></use>
+        </svg>
+      </div>
+      <div class="slot slot-above col-4"></div>
+      <div class="slot slot-gauge col-4">
+        <div class="rpm-wrapper">
+          <svg id="rpm-gauge" class="rpm-gauge" viewBox="0 0 300 300"></svg>
+          <span class="rpm-center-unit">RPM<br>x1000<br><br>cLoad %</span>
+          <span id="val-rpm-cload" class="rpm-center-cload">0</span>
+        </div>
+      </div>
+      <div class="slot slot-value col-4 gauge-value-box">
+        <span id="val-rpm">0</span>
+        <span class="unit">&nbsp;</span>
       </div>
 
-      <div class="card">
-        <p class="card-title"><svg class="ikona">
-            <use xlink:href="graphics.svg#motor"></use>
-          </svg>
-          <svg class="ikona">
-            <use xlink:href="graphics.svg#temp"></use>
-          </svg>
-        </p>
-        <canvas id="gauge-temperature"></canvas>
+      <!-- ===== COL 3: FUEL TANK ===== -->
+      <div class="slot slot-title col-2">
+        <svg class="ikona">
+          <use xlink:href="graphics.svg#levo"></use>
+        </svg>
+        <svg class="ikona">
+          <use xlink:href="graphics.svg#pumpa"></use>
+        </svg>
       </div>
+      <div class="slot slot-above col-2"></div>
+      <div class="slot slot-gauge col-2">
+        <div class="gauge-body">
+          <div class="gauge-scale" id="scale-tank"></div>
+          <div class="gauge-bar-outline">
+            <div class="gauge-bar-fill" id="bar-tank"></div>
+          </div>
+        </div>
+      </div>
+      <div class="slot slot-value col-2 gauge-value-box">
+        <span id="val-tank">0.0</span>
+        <span class="unit">L</span>
+      </div>
+
+      <!-- ===== COL 4: INVERTER TEMP ===== -->
+      <div class="slot slot-title col-5">
+        <svg class="ikona">
+          <use xlink:href="graphics.svg#munja"></use>
+        </svg>
+        <svg class="ikona">
+          <use xlink:href="graphics.svg#temp"></use>
+        </svg>
+      </div>
+      <div class="slot slot-above col-5"></div>
+      <div class="slot slot-gauge col-5">
+        <div class="gauge-body">
+          <div class="gauge-scale" id="scale-invTemp"></div>
+          <div class="gauge-bar-outline">
+            <div class="gauge-bar-fill" id="bar-invTemp"></div>
+          </div>
+        </div>
+      </div>
+      <div class="slot slot-value col-5 gauge-value-box">
+        <span id="val-invTemp">0</span>
+        <span class="unit">°C</span>
+      </div>
+
+      <!-- ===== COL 5: ENGINE TEMP ===== -->
+      <div class="slot slot-title col-3">
+        <svg class="ikona">
+          <use xlink:href="graphics.svg#motor"></use>
+        </svg>
+        <svg class="ikona">
+          <use xlink:href="graphics.svg#temp"></use>
+        </svg>
+      </div>
+      <div class="slot slot-above col-3"></div>
+      <div class="slot slot-gauge col-3">
+        <div class="gauge-body">
+          <div class="gauge-scale" id="scale-temp"></div>
+          <div class="gauge-bar-outline">
+            <div class="gauge-bar-fill" id="bar-temp"></div>
+          </div>
+        </div>
+      </div>
+      <div class="slot slot-value col-3 gauge-value-box">
+        <span id="val-temp">0</span>
+        <span class="unit">°C</span>
+      </div>
+
+      <!-- ===== COL 6: CURRENT  ===== -->
+      <div class="slot slot-title col-6">&nbsp;&nbsp;
+        <svg class="ikona">
+          <use xlink:href="graphics.svg#baterija"></use>
+        </svg>
+        <svg class="ikona">
+          <use xlink:href="graphics.svg#munja"></use>
+        </svg>
+      </div>
+      <div class="slot slot-above col-6"></div>
+      <div class="slot slot-gauge col-6">
+        <div class="gauge-body">
+          <div class="gauge-scale" id="scale-current"></div>
+          <div class="gauge-bar-outline">
+            <div class="gauge-bar-fill" id="bar-current"></div>
+          </div>
+        </div>
+      </div>
+      <div class="slot slot-value col-6 gauge-value-box">
+        <span id="val-current">0.0</span>
+        <span class="unit">A</span>
+      </div>
+
+      <!-- ===== COL 7: HV BATTERY (poslednja) ===== -->
+      <div class="slot slot-title col-7">
+        <svg class="ikona">
+          <use xlink:href="graphics.svg#baterija"></use>
+        </svg>
+      </div>
+      <div class="slot slot-above col-7">
+        <span id="auxVoltage" class="aux-voltage">0.0</span>
+      </div>
+      <div class="slot slot-gauge col-7">
+        <div id="stacked-battery-bar" class="stacked-battery-bar"></div>
+      </div>
+      <div class="slot slot-value col-7 gauge-value-box">
+        <span id="totalVoltage" class="battery-total-voltage">0</span>
+        <span class="unit">V</span>
+        <span id="packImbalance" class="unit">&nbsp;</span>
+      </div>
+
     </div>
 
+    <!-- ===== BOTTOM ===== -->
     <div class="card-grid">
       <div class="card2">
         &nbsp;&nbsp;&nbsp;<button id="resetAvSpeed" class="button">
@@ -107,33 +219,58 @@
       </div>
       <div class="card2">
         <div class="text-container">
-          <span id="ccSpeed"> km/h</span>
+          <span id="ccSpeed"></span>
         </div>
       </div>
       <div class="card2">
         <div class="text-container">
           <div class="card3">
-            <span id="speed">0</span>
+            <span id="speed">0</span><span style="font-size:14px;opacity:0.6"> km/h</span>
           </div>
         </div>
       </div>
-      <div class="card">
-        <canvas id="gauge-angle"></canvas>
+      
+      <div class="card5" style="width:100%">
+        <div class="steering-card">
+          <div class="steering-visual-container">
+            <svg viewBox="0 0 120 60" class="steering-wheel-svg" style="margin-left:auto">
+              <line class="axle" x1="35" y1="30" x2="85" y2="30" />
+
+              <g id="left-tire-group">
+                <rect class="tire" x="15" y="10" width="20" height="40" rx="3" />
+                <line class="tire-tread" x1="15" y1="20" x2="35" y2="20" />
+                <line class="tire-tread" x1="15" y1="30" x2="35" y2="30" />
+                <line class="tire-tread" x1="15" y1="40" x2="35" y2="40" />
+              </g>
+
+              <g id="right-tire-group">
+                <rect class="tire" x="85" y="10" width="20" height="40" rx="3" />
+                <line class="tire-tread" x1="85" y1="20" x2="105" y2="20" />
+                <line class="tire-tread" x1="85" y1="30" x2="105" y2="30" />
+                <line class="tire-tread" x1="85" y1="40" x2="105" y2="40" />
+              </g>
+            </svg>
+          </div>
+        </div>
       </div>
-      <div class="card4">
-        <svg class="ikona-small">
-          <use xlink:href="graphics.svg#auto"></use>
-        </svg>
-        <span id="tempRoomC">0</span>°C
+      <div class="card5">
+        <div class="text-container">
+          <div class="temp-row">
+            <svg class="ikona-small">
+              <use xlink:href="graphics.svg#auto"></use>
+            </svg>
+            &nbsp;
+            <span id="tempRoomC">0</span>°C
+          </div>
+        </div>
       </div>
     </div>
   </div>
-    <div class="debug">
+
+  <div class="debug">
     <br>
   </div>
-  <div id="debugText" class="debug">
-    V 1.1
-  </div>
+
   <script src="script.js"></script>
 </body>
 

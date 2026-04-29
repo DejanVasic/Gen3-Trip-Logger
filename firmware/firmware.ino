@@ -41,7 +41,10 @@
 #define CAN_REQST_AIR_CONDITIONER 0x7C4  //Room temperature
 #define CAN_REPLY_AIR_CONDITIONER 0x7CC
 #define CANPID_RTEMP 0x21
-
+#define CANPID_BATTERIES 0x81
+#define CANPID_IR 0x95
+#define CANPID_CURRENT 0x98
+#define CANPID_CL 0x01        // Calculated Load %
 #define CANPID_FUEL_INJ 0x3C  //213C
 #define CANPID_FUEL_STATUS 0x03
 #define CANPID_RPM 0x0C  //1C4 8	16	100/128+1/4
@@ -77,6 +80,7 @@ volatile float tankLitters = 0.0;
 volatile uint8_t fss = 0;  //Fuel Cut Status
 volatile uint16_t rpm = 0;
 float fuelConsumption = 0.0;
+const float FUEL_INJECT_FACTOR = 0.012f * 2.047f / 65535.0f;
 //bool fuelConsumptNew = false;
 volatile float tripConsumption = 0.0;
 uint8_t tankIndex = 0;
@@ -100,7 +104,38 @@ volatile unsigned long msecEV = 0;
 volatile float tripDistance = 0.0;
 volatile float tripDistanceEV = 0.0;
 extern portMUX_TYPE canReadMux;
+volatile uint8_t currentProcessingPid = 0;
+char voltagesStr[128] = { 0 };      //64 is enough
+uint8_t calculatedLoad = 0;         // % * 10
+volatile float battCurrent = 0.0f;  //+-200
+//Bty Curr	2198	(A * 256 + B) / 100 - 327.68
+volatile bool requestLockDoors = false;
+volatile bool requestUnlockDoors = false;
+volatile bool requestHazards = false;
+volatile uint8_t hazardParam = 0;
+volatile bool pendingResistanceRequest = false;
+
 portMUX_TYPE canReadMux = portMUX_INITIALIZER_UNLOCKED;
+
+#define MAX_ISO_TP_MSG_LEN 64
+#define WAITING_FOR_FIRST_FRAME 0
+#define RECEIVING_CONSECUTIVE_FRAMES 1
+#define MESSAGE_COMPLETE 2
+uint8_t isoTpState = WAITING_FOR_FIRST_FRAME;
+uint8_t isoTpBuffer[MAX_ISO_TP_MSG_LEN];
+uint8_t completedVoltagesBuffer[MAX_ISO_TP_MSG_LEN];
+uint16_t blockInternalRes[14] = { 0 };
+volatile bool voltageDataReady = false;
+/* enum IsoTpState {
+  WAITING_FOR_FIRST_FRAME,
+  RECEIVING_CONSECUTIVE_FRAMES,
+  MESSAGE_COMPLETE
+};
+IsoTpState isoTpState = WAITING_FOR_FIRST_FRAME;
+ */
+uint16_t isoTpMsgLength = 0;
+uint16_t isoTpBytesReceived = 0;
+uint8_t isoTpExpectedSeqNum = 1;
 
 //void errorBuzzer(uint8_t times = 2);
 void canTemperaturesFunction();
@@ -114,34 +149,42 @@ void requestInjectionInfo();
 void requestICEfss();
 void requestCCspeed();
 void calculateConsumption();
+void requestVoltages();
+void requestResistant();
+void requestCurrent();
+void requestCL();
+void requestVoltagesOrResistance();
 #include "Upload.h"
 
 void (*canFunctions[])() = {
   canTemperaturesFunction,
-  dummiFunction,
-  dummiFunction,
+  requestCurrent,
+  requestVoltagesOrResistance,
   dummiFunction,
   requestRPM,
   requestInjectionInfo,
   requestICEfss,
   requestCCspeed,
-  dummiFunction,
+  requestCL,
   calculateConsumption
 };
 void (*canTemperatureFunctions[])() = {
+  dummiFunction,
   requestTANKLEVEL,
   dummiFunction,
-  requestRoomTemp,
   dummiFunction,
+  dummiFunction,
+  requestRoomTemp,
   requestICEtemp,
   dummiFunction,
-  requestInvTemp
+  requestInvTemp,
+  dummiFunction
 };
 
-const int numCanFunctions = 10;  //sizeof(canFunctions) / sizeof(canFunctions[0]);
-const int numCanTempFunctions = sizeof(canTemperatureFunctions) / sizeof(canTemperatureFunctions[0]);
-int currentFunctionIndex = 0;
-int currentTemperatureFunctionIndex = 0;
+const uint8_t numCanFunctions = 10;  //sizeof(canFunctions) / sizeof(canFunctions[0]);
+const uint8_t numCanTempFunctions = sizeof(canTemperatureFunctions) / sizeof(canTemperatureFunctions[0]);
+uint8_t currentFunctionIndex = 0;
+uint8_t currentTemperatureFunctionIndex = 0;
 
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
@@ -172,8 +215,6 @@ void setup() {
   }
 
   Serial.println(F("--- --- --- --- --- Boot --- --- --- --- ---"));
-  // = 10000 + uploadInterval * -1;  //Try to connect after 10 seconds
-
 
   uint8_t step = 0;
   while (!SD.begin(chipSelect) && step <= 4) {
@@ -196,13 +237,14 @@ void setup() {
       vTaskDelay(50 / portTICK_RATE_MS);
       digitalWrite(LED_BUILTIN, HIGH);
       vTaskDelay(50 / portTICK_RATE_MS);
-      digitalWrite(gpsOn, HIGH);
-      readSettings();
-      gpsSerial.begin(GPS_BAUD, SERIAL_8N1, RXD2, TXD2);
-      //Serial.println(gpsSerial.available());
-      if (!noSettings) { webGpsTask(); }
     }
   }
+  digitalWrite(gpsOn, HIGH);
+  readSettings();
+  gpsSerial.begin(GPS_BAUD, SERIAL_8N1, RXD2, TXD2);
+  //Serial.println(gpsSerial.available());
+  if (!noSettings) { webGpsTask(); }
+
 
   CAN0.setCANPins((gpio_num_t)RX_PIN, (gpio_num_t)TX_PIN);
   CAN0.begin(CAN_BPS_500K);
@@ -248,27 +290,28 @@ void setup() {
 void loop() {
   msec = millis();
   if (digitalRead(IGNin) == LOW) {
-    if (((windows_status >> 0) & 0x01) || ((windows_status >> 2) & 0x01)) {  // rear window(s) open
-      buzzerSound();
+    bool rearOpen = ((windows_status >> 0) & 0x01) || ((windows_status >> 2) & 0x01);
+    bool frontOpen = ((windows_status >> 4) & 0x01) || ((windows_status >> 6) & 0x01);
+    unsigned long duration = 0;
+    if (rearOpen) {
+      buzzerSound(3, 10, true);
+    } else if (frontOpen) {
+      buzzerSound(2, 5, false);
     }
-    if (((windows_status >> 4) & 0x01) || ((windows_status >> 6) & 0x01)) {  // front window(s) open
-      tone(buzzer, 2000, 100);
-      vTaskDelay(150 / portTICK_RATE_MS);
-      tone(buzzer, 2000, 100);
-      vTaskDelay(150 / portTICK_RATE_MS);
-    }
+
     if (door_status != 0x1F && lockedDoorsByMe) { unlockDoors(); }
-    upLoad2Google(NULL);
+    upLoadTask();
+    //upLoad2Google(NULL);
   } else if (msec - msecBefore >= 50) {  //10 functions every 500 ms
     msecBefore = msec;
     canFunctions[currentFunctionIndex]();
     currentFunctionIndex = (currentFunctionIndex + 1) % numCanFunctions;
     //every500ms();
   }
-
+  handleCanSendRequests();
   if (msec - uploadms >= uploadInterval || odometer - uploadOdometer >= upOdomInterval) {  //upload data every uploadInterval sec or uploadOdometer
     //status = "upLoad Task start";
-    //Serial.println(F("upload to Gsheet"));
+    Serial.println(F("upload to Gsheet"));
     /*     if (uploadRetr) {
       uploadms = msec + 20000 + uploadInterval * -1;  //Try to connect after 20 seconds
       uploadRetr--;
@@ -277,7 +320,25 @@ void loop() {
     //}
     uploadOdometer = odometer;
     //vTaskSuspend(GPStask); //?!?
+    pendingResistanceRequest = true;
     upLoadTask();
+  }
+
+  vTaskDelay(1);
+}
+
+void handleCanSendRequests() {
+  if (requestLockDoors) {
+    requestLockDoors = false;  // Clear flag
+    lockDoors();
+  }
+  if (requestUnlockDoors) {
+    requestUnlockDoors = false;  // Clear flag
+    unlockDoors();
+  }
+  if (requestHazards) {
+    requestHazards = false;  // Clear flag
+    hazardLightsOn(hazardParam);
   }
 }
 
@@ -305,23 +366,24 @@ void canTemperaturesFunction() {
 } */
 
 void CB_SPEED(CAN_FRAME* can_bus) {
-  if (can_bus->length != expectedLength) {
-    Serial.println(F("CB_SPEED have unexpected CAN message length"));
-    return;
-  }
+  if (can_bus->length != expectedLength) return;
+
+
   static bool hazardLightsOnFlag = false;
   speed = can_bus->data.uint8[2];
   if (speed > 15 && door_status != 0x0) {
-    lockDoors();
+    requestLockDoors = true;                  //lockDoors();
   } else if ((speed < previousSpeed - 18)) {  //collision detection, 35.32 km/h ~18 km/0.5s
-    unlockDoors();
+    requestUnlockDoors = true;                //unlockDoors();
     hazardLightsOn(255);
   } else if ((speed < previousSpeed - 11) && !hazardLightsOnFlag) {  //hard breaking detection, 22 km/h = 11 km/0.5s
     hazardLightsOnFlag = true;
-    hazardLightsOn(previousSpeed);
+    requestHazards = true;  // hazardLightsOn(previousSpeed);
+    hazardParam = 255;
   } else if ((speed > previousSpeed + 1) && hazardLightsOnFlag) {
     hazardLightsOnFlag = false;
-    hazardLightsOn(0);
+    requestHazards = true;  //hazardLightsOn(0);
+    hazardParam = 0;
   }
   previousSpeed = speed;
 }
@@ -329,34 +391,30 @@ void CB_SPEED(CAN_FRAME* can_bus) {
 void CB_DIMM(CAN_FRAME* can_bus) {
   digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
 
-  if (can_bus->length != expectedLength) {
-    Serial.println(F("CB_DIMM have unexpected CAN message length"));
-    return;
-  }
+  if (can_bus->length != expectedLength) return;
 
   digitalWrite(dimmOut, bitRead(can_bus->data.uint8[4], 6));
+
   if (!flashedOnce && can_bus->data.uint8[5]) {  //can_bus->data.uint8[5] != 0 if any door is opened
-    hazardLightsOn(1);
+    requestHazards = true;                       //hazardLightsOn(1);
+    hazardParam = 1;
     flashedOnce = true;
   }
 }
 
 void CB_GEAR(CAN_FRAME* can_bus) {
-  if (can_bus->length != expectedLength) {
-    Serial.println(F("CB_GEAR have unexpected CAN message length"));
-    return;
-  }
+  if (can_bus->length != expectedLength) return;
+
   inPark = (can_bus->data.uint8[1] == 0x20);  //0x20 -P, 0x10 -R, 0x08 -N, 0x00 -D, 0x01 -S
-  if (inPark && door_status != 0x1F && lockedDoorsByMe) { unlockDoors(); }
+  if (inPark && door_status != 0x1F && lockedDoorsByMe) { requestUnlockDoors = true; }
 }
 
 void CB_REPLY_INSTRUMENT(CAN_FRAME* can_bus) {
-  if (can_bus->length != expectedLength) {
-    Serial.println(F("CB_REPLY_INSTRUMENT have unexpected CAN message length"));
-    return;
-  }
+  if (can_bus->length != expectedLength) return;
+
   if (can_bus->data.uint8[2] == CANPID_TANK_LEVEL) {
     canTankLevel = static_cast<float>(can_bus->data.uint8[3]);
+    portENTER_CRITICAL(&canReadMux);
     if (canTankLevel > 0.0f && canTankLevel < 100.0f) {  //accept only probably valid values
       if (readingCount < 100) { readingCount++; }
       litersSum += canTankLevel;
@@ -369,89 +427,62 @@ void CB_REPLY_INSTRUMENT(CAN_FRAME* can_bus) {
       }
       tankIndex = (tankIndex + 1) % 100;
     }
+    portEXIT_CRITICAL(&canReadMux);
   }
 }
 
-/* void CB_RPM(CAN_FRAME* can_bus) {
-  if (can_bus->length != expectedLength) {
-    Serial.println(F("CB_RPM have unexpected CAN message length"));
-    return;
-  }
-  uint16_t rpmTemp = ((can_bus->data.uint8[0] << 8) | can_bus->data.uint8[1]) * 0.78125;  //* 100/128
-                                                                                          //if ((rpmTemp < rpm + 1000 && rpmTemp > rpm - 1000) || rpmTemp == 0) rpm = rpmTemp;
-                                                                                          // if (rpmTemp < 500) {
-                                                                                          // rpm = 0;
-                                                                                          //} else if (rpmTemp < 6000) {  //rpmTemp < rpm + 1000 && rpmTemp > rpm - 1000
-
-  if (rpmTemp < 500) {
-    rpm = 0;
-  } else if (rpmTemp < 6000) {
-    rpm = rpmTemp;
-  }
-  //}
-} */
 
 void CB_REPLY_ICE(CAN_FRAME* can_bus) {
-  if (can_bus->length != expectedLength) {
-    Serial.println(F("CB_REPLY_ICE have unexpected CAN message length"));
-    return;
-  }
+  if (can_bus->length != expectedLength) return;
+
   if (can_bus->data.uint8[2] == CANPID_FUEL_INJ) {
-    //fuelConsumptNew = true;
-    fuelConsumption = 0.012f * ((can_bus->data.uint8[3] << 8) | can_bus->data.uint8[4]) * 2.047 / 65535.0 * (float)rpm;  // L/h  (injectedmLitters / 1000.0) * (rpm * 60 / 2 [injects every other turn]) * 4 [cylinders] / 10 [times data]
-    //if (rpm < 1200) fuelConsumption = fuelConsumption * (float)rpm / 1200.0f;  //correction when cylinder 1 does not injected 10 times in 0.5 sec because of low rpm - less than 1200
-    /*      if (rpm < 1200) fuelConsumption = fuelConsumption * (float)rpm / 1200.0f;  //correction when cylinder 1 does not injected 10 times in 0.5 sec because of low rpm - less than 1200
-    } */
-    /*     if (fss != 4 && rpm > 0) {                                                  
-      fuelConsumption = 0.012f * injectedmLitters * (float)rpm;                  // L/h  (injectedmLitters / 1000.0) * (rpm * 60 / 2 [injects every other turn]) * 4 [cylinders] / 10 [times data]
-      if (rpm < 1200) fuelConsumption = fuelConsumption * (float)rpm / 1200.0f;  //correction when cylinder 1 does not injected 10 times in 0.5 sec because of low rpm - less than 1200
-    } else {
-      fuelConsumption = 0.0f;
-    } */
+    portENTER_CRITICAL(&canReadMux);
+
+    fuelConsumption = FUEL_INJECT_FACTOR * ((can_bus->data.uint8[3] << 8) | can_bus->data.uint8[4]) * (float)rpm;  // L/h  (injectedmLitters / 1000.0) * (rpm * 60 / 2 [injects every other turn]) * 4 [cylinders] / 10 [times data]
+
+    portEXIT_CRITICAL(&canReadMux);
   } else if (can_bus->data.uint8[2] == CANPID_FUEL_STATUS) {
     fss = can_bus->data.uint8[3];
   } else if (can_bus->data.uint8[2] == CANPID_TEMP) {
     tempC = can_bus->data.uint8[3] - 40;
   } else if (can_bus->data.uint8[2] == CANPID_RPM) {
+    portENTER_CRITICAL(&canReadMux);
     rpm = ((can_bus->data.uint8[3] << 8) | can_bus->data.uint8[4]) / 4;
+    portEXIT_CRITICAL(&canReadMux);
   }
 }
 
 void CB_ODOMETER(CAN_FRAME* can_bus) {
-  if (can_bus->length != expectedLength) {
-    Serial.println(F("CB_ODOMETER have unexpected CAN message length"));
-    return;
-  }
+  if (can_bus->length != expectedLength) return;
+
+  portENTER_CRITICAL(&canReadMux);
   odometer = (can_bus->data.uint8[4] << 24) | (can_bus->data.uint8[5] << 16) | (can_bus->data.uint8[6] << 8) | can_bus->data.uint8[7];
+  portEXIT_CRITICAL(&canReadMux);
   if (uploadOdometer == 0) { uploadOdometer = odometer; }  //first read on boot
 }
 
 void CB_STEER(CAN_FRAME* can_bus) {
-  if (can_bus->length != expectedLength) {
-    Serial.println(F("CB_STEER have unexpected CAN message length"));
-    return;
-  }
+  if (can_bus->length != expectedLength) return;
+
+  portENTER_CRITICAL(&canReadMux);
   steeringAngle = ((can_bus->data.uint8[0] << 8) | can_bus->data.uint8[1]);
+  portEXIT_CRITICAL(&canReadMux);
   if (angleAlarm) {
-    if ((steeringAngle > 100 && steeringAngle < 347) || (steeringAngle < 3995 && steeringAngle > 1000)) buzzerSound();
+    if ((steeringAngle > 100 && steeringAngle < 347) || (steeringAngle < 3995 && steeringAngle > 1000)) buzzerSound(3, 2, true);
   }
   angleAlarm = false;  // only once
 }
 
 void CB_DOORS(CAN_FRAME* can_bus) {  // 0= all locked; 31 (1F)= all unlocked
-  if (can_bus->length != expectedLength) {
-    Serial.println(F("CB_DOORS have unexpected CAN message length"));
-    return;
-  }
+  if (can_bus->length != expectedLength) return;
+
   door_status = can_bus->data.uint8[2];
   windows_status = can_bus->data.uint8[4];
 }
 
 void CB_REPLY_AIR_CONDITIONER(CAN_FRAME* can_bus) {
-  if (can_bus->length != expectedLength) {
-    Serial.println(F("CB_REPLY_AIR_CONDITIONER have unexpected CAN message length"));
-    return;
-  }
+  if (can_bus->length != expectedLength) return;
+
   if (can_bus->data.uint8[2] == CANPID_RTEMP) {
     float tempResult = can_bus->data.uint8[3] * 63.75 / 255.0 - 6.5;
     tempRoomC = (int8_t)tempResult;
@@ -459,32 +490,94 @@ void CB_REPLY_AIR_CONDITIONER(CAN_FRAME* can_bus) {
 }
 
 void CB_REPLY_HV_ECU(CAN_FRAME* can_bus) {
-  if (can_bus->length != expectedLength) {
-    Serial.println(F("CB_REPLY_HV_ECU have unexpected CAN message length"));
+  if (can_bus->length != expectedLength) return;
+  uint8_t* data = can_bus->data.uint8;
+  uint8_t pci = data[0] >> 4;
+
+  // Single Frame
+  if (data[2] == CANPID_CC_SPEED) {
+    portENTER_CRITICAL(&canReadMux);
+    ccSpeed = (bitRead(data[6], 7) && data[4] > 35) ? data[4] : 0;
+    portEXIT_CRITICAL(&canReadMux);
     return;
   }
-  //Serial.print("-reply cruise or inverter-");
 
-  if (can_bus->data.uint8[2] == CANPID_CC_SPEED) {
-    if (bitRead(can_bus->data.uint8[6], 7) && can_bus->data.uint8[4] > 35) {  //
-      ccSpeed = can_bus->data.uint8[4];
-    } else {
-      ccSpeed = 0;
-    }
-  } else if (can_bus->data.uint8[3] == CANPID_INV_TEMP) {
-    invTemp = can_bus->data.uint8[7] - 40;
+  if (data[3] == CANPID_INV_TEMP) {
+    invTemp = data[7] - 40;
+    return;
   }
-  /*     Serial.print("HV wo CC: ");
-    for (int i = 0; i < can_bus->length; i++) {
-      Serial.print("\t");
-      if (can_bus->data.uint8[i] <= 0xF) {
-        Serial.print("0");
-      }
-      Serial.print(can_bus->data.uint8[i], HEX);
+  if (data[3] == CANPID_CL) {
+    calculatedLoad = data[4];  // only raw data * 200 / 51
+    return;
+  }
+  if (data[3] == CANPID_CURRENT) {
+    portENTER_CRITICAL(&canReadMux);
+    float rawStep = (float)(((uint16_t)data[4] << 8) | data[5]);
+    battCurrent = (rawStep / 100.0f) - 327.68f;
+    portEXIT_CRITICAL(&canReadMux);
+    return;
+  }
+  // ISO-TP
+  if (pci == 0x1) {  // FIRST FRAME
+    uint8_t pid = data[3];
+    if (pid != CANPID_BATTERIES && pid != CANPID_IR) return;
+
+    currentProcessingPid = pid;  // for next frame
+    isoTpMsgLength = (((uint16_t)(data[0] & 0x0F) << 8) | data[1]);
+
+    if (isoTpMsgLength > MAX_ISO_TP_MSG_LEN) {
+      resetIsoTp();
+      return;
     }
-    Serial.println();
-  } */
+    memcpy(isoTpBuffer, &data[2], 6);
+    isoTpBytesReceived = 6;
+    isoTpExpectedSeqNum = 1;
+    isoTpState = RECEIVING_CONSECUTIVE_FRAMES;
+    sendFlowControlFrame();
+  } else if (pci == 0x2) {  // CONSECUTIVE FRAME
+    if (isoTpState != RECEIVING_CONSECUTIVE_FRAMES || (data[0] & 0x0F) != isoTpExpectedSeqNum) {
+      resetIsoTp();
+      return;
+    }
+
+    uint8_t copyLen = min((int)7, (int)(isoTpMsgLength - isoTpBytesReceived));
+    memcpy(isoTpBuffer + isoTpBytesReceived, &data[1], copyLen);
+    isoTpBytesReceived += copyLen;
+    isoTpExpectedSeqNum = (isoTpExpectedSeqNum + 1) & 0x0F;
+
+    if (isoTpBytesReceived >= isoTpMsgLength) {
+      isoTpState = MESSAGE_COMPLETE;
+
+      portENTER_CRITICAL(&canReadMux);
+      if (currentProcessingPid == CANPID_BATTERIES) {
+        memcpy(completedVoltagesBuffer, isoTpBuffer, isoTpMsgLength);
+        voltageDataReady = true;
+      } else if (currentProcessingPid == CANPID_IR) {
+        //Serial.print("Resistance: ");
+
+        for (uint8_t i = 0; i < 14; i++) {
+          blockInternalRes[i] = isoTpBuffer[2 + i];
+        }
+      }
+      portEXIT_CRITICAL(&canReadMux);
+
+      resetIsoTp();
+    }
+  }
 }
+
+void sendFlowControlFrame() {
+  uint8_t data[8] = { 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+  sendCANFrame(CAN_REQST_HV_ECU, 8, data);
+}
+
+void resetIsoTp() {
+  isoTpMsgLength = 0;
+  isoTpBytesReceived = 0;
+  isoTpExpectedSeqNum = 1;
+  isoTpState = WAITING_FOR_FIRST_FRAME;
+}
+
 
 // \\Callback functions:
 
@@ -495,9 +588,7 @@ void sendCANFrame(uint32_t id, uint8_t len, const uint8_t* data) {
   outgoing.length = len;
   outgoing.extended = 0;
   outgoing.rtr = 0;
-  for (int i = 0; i < len; i++) {
-    outgoing.data.uint8[i] = data[i];
-  }
+  memcpy(outgoing.data.uint8, data, len);
   CAN0.sendFrame(outgoing);
 }
 
@@ -528,23 +619,41 @@ void hazardLightsOn(uint8_t sec) {
 }
 
 // Buzzer
-void buzzerSound() {
-  //errorBuzzer(3);
-  uint8_t data[8] = { 0x40, 0x04, 0x30, 0x14, 0x01, 0x80, 0x00, 0x00 };
-  sendCANFrame(CAN_MAIN_BODY, 8, data);
-  tone(buzzer, 2000, 2000);
-}
+void buzzerSound(uint8_t mode, uint32_t durationSec, bool beepDash) {
+  static uint32_t soundStartTime = 0;
+  static uint32_t lastCanSend = 0;
+  static uint32_t lastToggle = 0;
+  static bool state = false;
 
-// IGNORE THIS
-/* void buzzerSoundTest() {
-  tone(buzzer, 2000, 100);
-  vTaskDelay(200 / portTICK_RATE_MS);
-  uint8_t data[8] = { 0x21, 0x3d, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00 };
-  sendCANFrame(0x7B0, 8, data);
-  vTaskDelay(400 / portTICK_RATE_MS);
-  uint8_t data2[8] = { 0x21, 0x3d, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00 };
-  sendCANFrame(0x7B0, 8, data2);
-} */
+  if (soundStartTime == 0) soundStartTime = msec;
+
+  if (msec - soundStartTime > (durationSec * 1000)) {
+    noTone(buzzer);
+    soundStartTime = 0;  // Reset
+    return;
+  }
+
+  if (beepDash && (msec - lastCanSend > 5000)) {
+    uint8_t data[8] = { 0x40, 0x04, 0x30, 0x14, 0x01, 0x80, 0x00, 0x00 };
+    sendCANFrame(CAN_MAIN_BODY, 8, data);
+    lastCanSend = msec;
+  }
+
+  uint32_t interval = 0;
+  uint32_t tonDuration = 100;
+
+  if (mode == 1) {
+    tone(buzzer, 2000);  // flat tone
+  } else {
+    interval = (mode == 2) ? 300 : 150;  // beep speed
+    if (msec - lastToggle > interval) {
+      state = !state;
+      lastToggle = msec;
+      if (state) tone(buzzer, 2000, tonDuration);
+      else noTone(buzzer);
+    }
+  }
+}
 
 // Dummy function
 void dummiFunction() {
@@ -553,27 +662,31 @@ void dummiFunction() {
 
 // Consumption calculation
 void calculateConsumption() {
-  /*       if (msec < 600000) {
-      Serial.print(" ms:");
-      Serial.print(msec);
-      Serial.print(" fss:");
-      Serial.print(fss);
-      Serial.print(" rpm:");
-      Serial.print(rpm);
-      Serial.print(" spd:");
-      Serial.print(speed);
-      Serial.print(" fc:");
-      Serial.println(fuelConsumption);
-    }
- */
-  tripDistance += (float)speed * TIME_FRACTION;
+
+  float localSpeed;
+  float localFuelConsumption;
+  uint16_t localRpm;
+  uint8_t localFss;
+  portENTER_CRITICAL(&canReadMux);
+  localSpeed = (float)speed;
+  localFuelConsumption = fuelConsumption;
+  localRpm = rpm;
+  localFss = fss;
+  portEXIT_CRITICAL(&canReadMux);
+
+  float distanceThisCycle = localSpeed * TIME_FRACTION;
+
+  // tripDistance += (float)speed * TIME_FRACTION;
   //if ((speed > 10 && fss == 4 && rpm > 1200) || rpm < 800) {  //deceleration ?
-  if ((fss == 4 && speed > 15) || rpm == 0) {  //deceleration ?
+  portENTER_CRITICAL(&canReadMux);  // Protect writes to trip variables
+  tripDistance += distanceThisCycle;
+  if ((localFss == 4 && localSpeed > 15) || localRpm == 0) {
     msecEV += 500;
-    tripDistanceEV += (float)speed * TIME_FRACTION;
+    tripDistanceEV += distanceThisCycle;
   } else {
-    tripConsumption += fuelConsumption * TIME_FRACTION;
+    tripConsumption += localFuelConsumption * TIME_FRACTION;
   }
+  portEXIT_CRITICAL(&canReadMux);
 }
 
 // PID requests
@@ -602,6 +715,27 @@ void requestCCspeed() {
 void requestInvTemp() {
   requestPID(CAN_REQST_HV_ECU, 0x21, CANPID_INV_TEMP);
 }
+void requestVoltages() {
+  requestPID(CAN_REQST_HV_ECU, 0x21, CANPID_BATTERIES);
+}
+void requestResistant() {
+  requestPID(CAN_REQST_HV_ECU, 0x21, CANPID_IR);
+}
+void requestCurrent() {
+  requestPID(CAN_REQST_HV_ECU, 0x21, CANPID_CURRENT);
+}
+void requestCL() {
+  requestPID(CAN_REQST_HV_ECU, 0x21, CANPID_CL);
+}
+
+void requestVoltagesOrResistance() {
+  if (pendingResistanceRequest) {
+    pendingResistanceRequest = false;
+    requestResistant();
+  } else {
+    requestVoltages();
+  }
+}
 
 void upLoadTask() {
   if (GoogleTask == NULL) {
@@ -628,30 +762,3 @@ void webGpsTask() {
       0);        /* Core where the task should run */
   }
 }
-
-/* void errorBuzz(void* parameter) {
-  uint8_t times = *((uint8_t*)parameter);
-  for (uint8_t i = 0; i < times; i++) {
-    tone(buzzer, 2000, 200);
-    vTaskDelay(300 / portTICK_PERIOD_MS);
-  }
-  errorBuzzTask = NULL;  // reset handle to indicate completion
-  vTaskDelete(NULL);     // delete this task
-}
- 
-void errorBuzzer(uint8_t times) {
-  if (errorBuzzTask == NULL) {
-    
-    static uint8_t timesParam;// We need to pass times by pointer, so let's store it in a static variable
-    timesParam = times;
-    xTaskCreatePinnedToCore(
-      errorBuzz,      // Function to implement the task
-      "errorBuzz",    // Name of the task
-      2048,           // Stack size in words or bytes - verify
-      &timesParam,    // Task input parameter
-      1,              // Priority of the task
-      &errorBuzzTask, // Task handle
-      0               // Core where the task should run
-    );
-  }
-}*/
