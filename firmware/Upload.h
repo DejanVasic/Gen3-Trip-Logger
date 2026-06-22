@@ -218,6 +218,17 @@ void write2SD() {
   }
 }
 
+bool hasInternet() {
+  WiFiClient client;
+  client.setTimeout(2);  // 2s max
+  if (!client.connect("1.1.1.1", 53, 2000)) {
+    client.stop();
+    return false;
+  }
+  client.stop();
+  return true;
+}
+
 
 void connect2WIFI() {
   static bool wiFiConnectied = false;
@@ -228,7 +239,11 @@ void connect2WIFI() {
       Serial.println(WiFi.RSSI());
       Serial.print(F(" CONNECTED: "));
       Serial.println(WiFi.localIP());
-      configTime(0, 0, "0.europe.pool.ntp.org", "rs.pool.ntp.org", "pool.ntp.org");
+      if (hasInternet()) {
+        configTime(0, 0, "0.europe.pool.ntp.org", "rs.pool.ntp.org", "pool.ntp.org");
+      } else {
+        Serial.println(F("WiFi connected but no internet - skipping NTP"));
+      }
     }
     return;
   } else {
@@ -238,7 +253,7 @@ void connect2WIFI() {
     WiFi.setHostname(HOSTNAME);
     WiFi.setSleep(false);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    if (WiFi.waitForConnectResult(3000) != WL_CONNECTED) {
+    if (WiFi.waitForConnectResult(1000) != WL_CONNECTED) {
       Serial.print(F("WIFI connecting to "));
       Serial.println(WIFI_SSID);
     }
@@ -293,11 +308,16 @@ void upLoad2Google(void* parameter) {
 
   //if (msec > uploadms + 10000) { upLoad2Google(NULL); }  // less than 10 secondes passed after last upload //upLoadTask();
 
-  if (uploading) return;
+  if (uploading) {
+    GoogleTask = NULL;
+    vTaskDelete(NULL);
+    return;
+  }
   uploading = true;
   vTaskDelay(1 / portTICK_RATE_MS);
+
   //connect2WIFI();
-  if (WiFi.status() != WL_CONNECTED) {
+  if (WiFi.status() != WL_CONNECTED || !hasInternet()) {
     write2SD();
     uploading = false;
     if (digitalRead(IGNin) == LOW) {
@@ -363,8 +383,8 @@ void upLoad2Google(void* parameter) {
       uint8_t rowCount = 0;    // Reset row count for each batch
       uint8_t row = liveData;  // Reset row for each batch
 
-      char line[256];     // TSV linija - sadrzi do 13 polja
-      char fieldBuf[32];  // Pojedinacno polje iz linije
+      char line[256];     // TSV line - up to 13 fields
+      char fieldBuf[32];  // one field from line
       char keyBuf[32];    // JSON put-key "values/[col]/[row]"
 
       while (rowCount < 50 && dataFile.available()) {

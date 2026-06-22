@@ -95,7 +95,6 @@ function describeArc(cx, cy, r, startAngle, endAngle) {
     const start = polarToCartesian(cx, cy, r, startAngle)
     const end = polarToCartesian(cx, cy, r, endAngle)
     const largeArc = (endAngle - startAngle) <= 180 ? 0 : 1
-    // sweep=1 -> smer kazaljke na satu (od startAngle ka endAngle)
     return [
         'M', start.x, start.y,
         'A', r, r, 0, largeArc, 1, end.x, end.y
@@ -584,9 +583,6 @@ function updateBatteryBars(voltagesStr, current) {
     }
 
     // --- Pack imbalance (peak tracking) ---
-    // Racuna max-min napon medju blokovima. Peak se prati preko cele vozenje.
-    // Reset peaka se desava kad struja baterije promeni smer (punjenje <-> praznjenje),
-    // jer se tada dobijaju sveze "stress" vrednosti pod opterecenjem.
     if (realVoltages.length >= 2) {
         let maxV = -Infinity, minV = Infinity
         let maxIdx = 0, minIdx = 0
@@ -598,8 +594,6 @@ function updateBatteryBars(voltagesStr, current) {
         const deltaV = maxV - minV
         const deltaPct = (deltaV / minV) * 100
 
-        // Detekcija promene smera struje (reset peak-a).
-        // Deadband oko nule sprecava lazne resetove na sumu blizu 0A.
         const CURRENT_DEADBAND = 2.0   // A
         if (typeof current === 'number') {
             const sign = current > CURRENT_DEADBAND ? 1
@@ -609,7 +603,6 @@ function updateBatteryBars(voltagesStr, current) {
                 if (_cache.lastCurrentSign !== undefined
                     && _cache.lastCurrentSign !== 0
                     && _cache.lastCurrentSign !== sign) {
-                    // Smer struje se promenio → reset peak-a
                     _cache.peakDeltaV = 0
                     _cache.peakDeltaPct = 0
                     _cache.peakWeakIdx = -1
@@ -619,7 +612,6 @@ function updateBatteryBars(voltagesStr, current) {
             }
         }
 
-        // Update peak-a ako je trenutna delta veca od zabelezene
         if (deltaV > (_cache.peakDeltaV || 0)) {
             _cache.peakDeltaV = deltaV
             _cache.peakDeltaPct = deltaPct
@@ -627,14 +619,12 @@ function updateBatteryBars(voltagesStr, current) {
             _cache.peakStrongIdx = maxIdx
         }
 
-        // Prikaz: koristi peak vrednosti ako postoje, inace trenutne.
-        // Format: "Δ 0.48V  3.1%  B12"
         const showDeltaV = _cache.peakDeltaV || deltaV
         const showDeltaPct = _cache.peakDeltaPct || deltaPct
         const showWeakIdx = _cache.peakWeakIdx >= 0 ? _cache.peakWeakIdx : minIdx
         const showStrongIdx = _cache.peakStrongIdx >= 0 ? _cache.peakStrongIdx : maxIdx
         //const html = `Δ ${showDeltaV.toFixed(2)}V&nbsp; <br>${showDeltaPct.toFixed(1)}%&nbsp; B${showWeakIdx + 1}`
-        const html = `Δ ${showDeltaV.toFixed(2)}V&nbsp; ${showDeltaPct.toFixed(1)}%<br> ${showStrongIdx + 1} <-> ${showWeakIdx + 1}`
+        const html = `Δ ${showDeltaV.toFixed(1)}V&nbsp; ${showDeltaPct.toFixed(1)}%<br> ${showStrongIdx + 1} <-> ${showWeakIdx + 1}`
         setHtml(packImbalanceElement, 'packImbalanceHtml', html)
     }
 

@@ -742,7 +742,7 @@ void upLoadTask() {
     xTaskCreatePinnedToCore(
       upLoad2Google, /* Function to implement the task */
       "GoogleTask",  /* Name of the task */
-      12288,         /* Stack size in words, 4096 is't enough 8192, 12288, 24576 */
+      24576,         /* Stack size in words, 4096 is't enough 8192, 12288, 24576 */
       NULL,          /* Task input parameter */
       0,             /* Priority of the task, anything bigger than 0 (idle) sometimes trigger the watchdog */
       &GoogleTask,   /* Task handle. */
