@@ -75,6 +75,19 @@ const ALERTS = {
     avCons: { high: 10 }
 }
 
+
+
+
+const HV_CFG = {
+    blockCount: 14,
+    packMinV: 194,
+    packMaxV: 250,
+    get blockMinV() { return this.packMinV / this.blockCount },  // 13.857V = 194/14
+    get blockMaxV() { return this.packMaxV / this.blockCount },  // 17.857V = 250/14
+    alertLowV: 14.0,     // red
+    get alertHighV() { return this.blockMaxV - 0.1 }  // orange
+}
+
 const RPM_CFG = {
     cx: 150, cy: 150,
     radius: 112,
@@ -95,6 +108,7 @@ function describeArc(cx, cy, r, startAngle, endAngle) {
     const start = polarToCartesian(cx, cy, r, startAngle)
     const end = polarToCartesian(cx, cy, r, endAngle)
     const largeArc = (endAngle - startAngle) <= 180 ? 0 : 1
+
     return [
         'M', start.x, start.y,
         'A', r, r, 0, largeArc, 1, end.x, end.y
@@ -388,8 +402,9 @@ window.addEventListener('load', () => {
     button.addEventListener('click', resetAvSpeed)
 
     return;
-    // Test data 
-    updateBatteryBars('172,178,170,170,170,170,170,170,170,170,170,170,170,180,128', -19)
+
+    // Test data 208, 218, 238
+    updateBatteryBars('170,170,170,170,170,170,170,170,170,170,170,170,170,170,128', -19)
     updateCurrentBar(-19, 100, 100)
     updateSolidBar('temp', 91, 120)
     updateSolidBar('invTemp', 20, 100)
@@ -445,10 +460,32 @@ function resetAvSpeed() {
 }
 
 function updatePriusColor(avSpeed) {
+
+    if (_cache.dateInvalid) return
     const filter = avSpeed > 130
         ? "invert(0.32) sepia(77%) saturate(3814%) hue-rotate(329deg) brightness(101%) contrast(91%)"
         : "invert(0.15) sepia(1) saturate(4) hue-rotate(130deg)"
     setStyle(priusRElement, 'priusFilter', 'filter', filter)
+}
+
+
+
+const MIN_VALID_DATE_MS = new Date(2026, 4, 1).getTime()  // 1. maj 2026
+
+function checkSystemDate() {
+    const now = Date.now()
+    const invalid = now < MIN_VALID_DATE_MS
+    if (invalid === _cache.dateInvalid) return  // bez promene
+    _cache.dateInvalid = invalid
+    if (invalid) {
+        // Crvena boja - ista kao kad je avSpeed > 130
+        setStyle(priusRElement, 'priusFilter', 'filter',
+            "invert(0.32) sepia(77%) saturate(3814%) hue-rotate(329deg) brightness(101%) contrast(91%)")
+    } else {
+        // Datum se popravio - vrati na default zelenu
+        setStyle(priusRElement, 'priusFilter', 'filter',
+            "invert(0.15) sepia(1) saturate(4) hue-rotate(130deg)")
+    }
 }
 
 function msToTime(milliseconds) {
@@ -594,6 +631,8 @@ function updateBatteryBars(voltagesStr, current) {
         const deltaV = maxV - minV
         const deltaPct = (deltaV / minV) * 100
 
+
+
         const CURRENT_DEADBAND = 2.0   // A
         if (typeof current === 'number') {
             const sign = current > CURRENT_DEADBAND ? 1
@@ -603,6 +642,7 @@ function updateBatteryBars(voltagesStr, current) {
                 if (_cache.lastCurrentSign !== undefined
                     && _cache.lastCurrentSign !== 0
                     && _cache.lastCurrentSign !== sign) {
+
                     _cache.peakDeltaV = 0
                     _cache.peakDeltaPct = 0
                     _cache.peakWeakIdx = -1
@@ -612,12 +652,15 @@ function updateBatteryBars(voltagesStr, current) {
             }
         }
 
+
         if (deltaV > (_cache.peakDeltaV || 0)) {
             _cache.peakDeltaV = deltaV
             _cache.peakDeltaPct = deltaPct
             _cache.peakWeakIdx = minIdx
             _cache.peakStrongIdx = maxIdx
         }
+
+
 
         const showDeltaV = _cache.peakDeltaV || deltaV
         const showDeltaPct = _cache.peakDeltaPct || deltaPct
@@ -632,15 +675,19 @@ function updateBatteryBars(voltagesStr, current) {
     realVoltages.forEach((voltage, index) => {
         const segment = segmentElements[index]
         if (!segment) return
-        const blockFill = Math.max(0, Math.min(1, (voltage - 12) / 8))
+
+
+
+        const range = HV_CFG.blockMaxV - HV_CFG.blockMinV
+        const blockFill = Math.max(0, Math.min(1, (voltage - HV_CFG.blockMinV) / range))
         let segmentHeightPx = blockFill * 16
         segment.cell.style.bottom = `${currentPixelHeight + 1}px`
         segment.cell.style.height = `${segmentHeightPx.toFixed(2)}px`
         currentPixelHeight += segmentHeightPx + 1
 
         let newColor
-        if (voltage < 14.0) newColor = '#F43662'
-        else if (voltage > 18.0) newColor = '#FF9800'
+        if (voltage < HV_CFG.alertLowV) newColor = '#F43662'
+        else if (voltage > HV_CFG.alertHighV) newColor = '#FF9800'
         else newColor = 'rgba(145, 232, 206, 0.8)'
         if (isDirtyStr('segColor-' + index, newColor)) {
             segment.cell.style.backgroundColor = newColor
@@ -668,9 +715,8 @@ function addReferenceLabels() {
     if (!container) return
 
     const referencePoints = [
-        { p: 210 },
-        { p: 152 },
-        { p: 91 }
+        { p: 190 },
+        { p: 70 }
     ]
 
     referencePoints.forEach(point => {
