@@ -1,6 +1,166 @@
-const PriusESP32 = SpreadsheetApp.openById("read_from_sharred_google_spreadsheet_url")
+const PriusESP32 = SpreadsheetApp.openById("1MY7rprDmPVs06Jik2sF1Y-LCJc9weHHboOkqMk8uoIU")
 const PriusSh = PriusESP32.getSheetByName("Prius")
 
+// =============================================================================
+// Helper: parses a GPS DateTime field into milliseconds since epoch (UTC).
+// The value may be a Date object (as Sheets returns it), a string, or a number.
+// Returns null if it cannot be parsed.
+//
+// Locale-safe: uses explicit regexes for known formats, does not rely on the
+// JS Date parser (which is locale-dependent in some implementations).
+// Supported formats:
+//   - Date object (as Sheets returns when it parses successfully)
+//   - "DD.MM.YYYY HH:MM:SS" or "DD.MM.YYYY. HH:MM:SS" (sr/EU)
+//   - "MM/DD/YYYY HH:MM:SS" (US)
+//   - "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DDTHH:MM:SS" (ISO)
+// =============================================================================
+function parseGpsDateTime(val) {
+  if (val == null || val === "" || val === 0) return null
+  
+  // Case 1: Date object (Sheets parsed it successfully).
+  // IMPORTANT: Sheets stores datetime as a "naive" value in the sheet timezone.
+  // val.getTime() would return milliseconds interpreting that value as LOCAL time.
+  // Since the GPS DateTime column CONTAINS a UTC value (as its header states),
+  // we extract the LOCAL components and construct a UTC epoch from them.
+  // Example: Sheets returns a Date with local components 2026-06-25 05:22:56,
+  // which is actually UTC time - so Date.UTC(2026, 5, 25, 5, 22, 56) is the correct epoch.
+  if (val instanceof Date) {
+    const t = Date.UTC(
+      val.getFullYear(), val.getMonth(), val.getDate(),
+      val.getHours(), val.getMinutes(), val.getSeconds()
+    )
+    if (t > 1577836800000) return t  // > 2020-01-01
+    return null
+  }
+  
+  // Case 2: string - try several known formats
+  if (typeof val === "string") {
+    const s = val.trim()
+    let m
+    
+    // Format: DD.MM.YYYY HH:MM:SS (with or without trailing dot after year)
+    m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})\.?\s+(\d{1,2}):(\d{2}):(\d{2})$/)
+    if (m) {
+      const t = Date.UTC(+m[3], +m[2] - 1, +m[1], +m[4], +m[5], +m[6])
+      if (t > 1577836800000) return t
+    }
+    
+    // Format: MM/DD/YYYY HH:MM:SS (US)
+    m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})$/)
+    if (m) {
+      const t = Date.UTC(+m[3], +m[1] - 1, +m[2], +m[4], +m[5], +m[6])
+      if (t > 1577836800000) return t
+    }
+    
+    // Format: YYYY-MM-DD HH:MM:SS or YYYY-MM-DDTHH:MM:SS (ISO)
+    m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})[T\s](\d{1,2}):(\d{2}):(\d{2})/)
+    if (m) {
+      const t = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6])
+      if (t > 1577836800000) return t
+    }
+  }
+  
+  // Case 3: number (Sheets serial date - days since 1899-12-30)
+  if (typeof val === "number" && val > 30000 && val < 100000) {
+    // Convert Sheets serial -> milliseconds.
+    // Sheets epoch is 1899-12-30 (Excel-compatible).
+    const sheetsEpochMs = Date.UTC(1899, 11, 30)
+    const t = sheetsEpochMs + val * 86400000
+    if (t > 1577836800000) return t
+  }
+  
+  return null
+}
+
+// =============================================================================
+// Helper: if the Unix Date in a row is wrong due to an ESP32 NTP issue
+// (wake-up row with a stale RTC value), returns the corrected value in seconds
+// since epoch. Returns null if no fix is needed or possible.
+//
+// Logic - three scenarios:
+//   1. Not a wake-up row (millis >= 15000) => returns null (leave alone)
+//   2. Wake-up with a valid GPS DateTime:
+//      - if Unix vs GPS differs by > 30s, use GPS as the source of truth
+//   3. Wake-up without GPS (referenceUnix and referenceMillis provided):
+//      - computes expected Unix from reference: refUnix - (refMillis - millis)/1000
+//      - if that differs from the current Unix by more than 30s, fixes it
+//      - the "reference" is another row in the same trip that is NOT a wake-up
+//
+// Parameters:
+//   unixSec         - current Unix value (number, seconds since epoch)
+//   millis          - Milliseconds field from that row
+//   gpsDt           - GPS DateTime field from that row (Date | string | 0 | null)
+//   referenceUnix   - optional: Unix from a non-wakeup row in the same trip
+//   referenceMillis - optional: Millisec from the same reference row
+// =============================================================================
+function maybeFixUnixDate(unixSec, millis, gpsDt, referenceUnix, referenceMillis) {
+  if (millis == null || millis >= 15000) return null  // not a wake-up
+  if (unixSec == null || unixSec < 1700000000) return null  // unix already invalid, leave alone
+  
+  // Scenario 1: GPS available - best source of truth
+  const gpsMs = parseGpsDateTime(gpsDt)
+  if (gpsMs != null) {
+    const gpsSec = Math.round(gpsMs / 1000)
+    const diff = Math.abs(unixSec - gpsSec)
+    if (diff <= 30) return null
+    return gpsSec
+  }
+  
+  // Scenario 2: no GPS - try the fallback via a reference row in the same trip
+  if (referenceUnix != null && referenceUnix > 1700000000 && 
+      referenceMillis != null && referenceMillis >= 15000) {
+    // The wake-up row is EARLIER than the reference (smaller millis = earlier in the trip).
+    // Assumption: the reference is a non-wakeup row so it has a correct unix.
+    // Expected unix = ref_unix - (ref_millis - millis) / 1000
+    const expectedUnix = referenceUnix - Math.round((referenceMillis - millis) / 1000)
+    const diff = Math.abs(unixSec - expectedUnix)
+    if (diff <= 30) return null  // unix already OK
+    return expectedUnix
+  }
+  
+  return null  // nothing to compare against
+}
+
+
+// =============================================================================
+// Helper: in a sorted Tabela, find the nearest non-wakeup row in the same trip
+// to use as a reference for the fallback fix. Tabela must be sorted by
+// (TRIP # desc, millis desc) - as sortFunction produces.
+//
+// Returns [refUnix, refMillis] or [null, null] if no reference is found.
+//
+// Parameters:
+//   Tabela    - 2D array from Sorter (sorted)
+//   i         - index of the row being fixed
+//   tripCol   - index of the TRIP # column in Tabela (8 in Sorter)
+//   unixCol   - index of the Unix column in Tabela (0)
+//   millisCol - index of the Millisec column in Tabela (1)
+// =============================================================================
+function findReferenceRow(Tabela, i, tripCol, unixCol, millisCol) {
+  const trip = Tabela[i][tripCol]
+  // In a Tabela sorted by (trip desc, millis desc):
+  //   - a row with larger millis in the same trip is ABOVE (smaller i)
+  //   - a row with smaller millis in the same trip is BELOW (larger i)
+  // A wake-up row has SMALL millis so it's usually at the BOTTOM of its trip block.
+  // We look for a non-wakeup row - those have larger millis so they're ABOVE.
+  
+  // Search BACKWARD (smaller indices = larger millis in the same trip)
+  for (let j = i - 1; j >= 0; j--) {
+    if (Tabela[j][tripCol] != trip) break  // left the trip block
+    if (Tabela[j][millisCol] >= 15000 && Tabela[j][unixCol] > 1700000000) {
+      return [Tabela[j][unixCol], Tabela[j][millisCol]]
+    }
+  }
+  // Search FORWARD (larger indices = smaller millis in the same trip)
+  // Less likely for a wake-up row, but possible if there is an even smaller wake-up below.
+  for (let j = i + 1; j < Tabela.length; j++) {
+    if (Tabela[j][tripCol] != trip) break
+    if (Tabela[j][millisCol] >= 15000 && Tabela[j][unixCol] > 1700000000) {
+      return [Tabela[j][unixCol], Tabela[j][millisCol]]
+    }
+  }
+  return [null, null]
+}
 
 function Mapiranje(e) {
   var Shit = e.source.getActiveSheet()
@@ -151,6 +311,19 @@ function Sorter() {
 
     if (Tabela[i][14] == "") { // If column O is empty = new row
 
+      // === FIX UNIX DATE FOR WAKE-UP ROWS ===
+      // ESP32 sometimes writes a stale RTC value into the Unix Date field when
+      // it wakes from deep sleep, before NTP has had time to synchronize.
+      // Detected by Milliseconds < 15000 and a > 30s mismatch against GPS DateTime.
+      // If GPS is missing, uses a non-wakeup row from the same trip as a reference.
+      var refData = findReferenceRow(Tabela, i, 8, 0, 1)
+      var fixedUnix = maybeFixUnixDate(Tabela[i][0], Tabela[i][1], Tabela[i][4],
+                                       refData[0], refData[1])
+      if (fixedUnix != null) {
+        Tabela[i][0] = fixedUnix
+      }
+      // === END FIX ===
+
       Tabela[i][13] = Tabela[i][1] > 0 ? Tabela[i][1] / 86400000 : "" //1000 * 60 * 60 * 24 
 
       if (Tabela[i][12] instanceof Date) { //appended row picked hh:mm:ss formatting and than GS converted its milliseconds to time
@@ -183,7 +356,7 @@ function Sorter() {
             }
           }
           Tabela[i][3] = tempTank
-        } else if (Tabela[i][3] - 5 > Tabela[i + 1][3] && Tabela[i][8] != Tabela[i + 1][8] ) {//tank refill?
+        } else if (Tabela[i][3] - 5 > Tabela[i + 1][3] && Tabela[i][8] != Tabela[i + 1][8]) {//tank refill?
           TankRefill = i
           for (var a = i + 1; a < lastRow; a++) {
             if (Tabela[a][17].toString().startsWith("Av:")) { //previous refill
@@ -191,8 +364,12 @@ function Sorter() {
               Litara = Tabela[i][3] - Tabela[i + 1][3]
               const CeneSh = PriusESP32.getSheetByName("Gorivo")
               var cena = CeneSh.getRange(7, 3).getValue()
-              if (isNaN(cena) && cena.length > 3) { cena = cena.substring(0, 3) }
-              Tabela[i][17] = "Av:" + (100 * Litara / Put).toFixed(2) + " l/100km (" + Litara.toFixed(1) + "l, " + Put.toFixed(0) + "km) " + " Refill: " + cena.toFixed(2) + " x " + (Tabela[i][3] - Tabela[i + 1][3]).toFixed(2) + " = " + (cena.toFixed(2) * (Tabela[i][3] - Tabela[i + 1][3])).toFixed(2)
+              const Cenabroj = parseFloat(
+                cena.replace('RSD', '')   // ukloni valutu
+                  .trim()               // skloni razmake
+                  .replace(',', '.')    // zarez → tačka
+              );
+              Tabela[i][17] = "Av:" + (100 * Litara / Put).toFixed(2) + " l/100km (" + Litara.toFixed(1) + "l, " + Put.toFixed(0) + "km) " + " Refill: " + Cenabroj.toFixed(2) + " x " + (Tabela[i][3] - Tabela[i + 1][3]).toFixed(2) + " = " + (Cenabroj.toFixed(2) * (Tabela[i][3] - Tabela[i + 1][3])).toFixed(2)
               break
             }
           }
